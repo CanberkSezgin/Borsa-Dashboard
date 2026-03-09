@@ -78,9 +78,13 @@ def get_real_headlines(ticker: str) -> list[dict]:
     print(f"DEBUG: Found {len(news_items)} headlines for {ticker}")
         
     headlines = []
-    
     for item in news_items:
-        content = item.get("content", item) # Handle both new dict structure and fallback to old root
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content") or item
+        if not isinstance(content, dict):
+            continue
+            
         title = content.get("title")
         pub_date_val = content.get("pubDate") or content.get("providerPublishTime")
         
@@ -98,9 +102,14 @@ def get_real_headlines(ticker: str) -> list[dict]:
             if (today - pub_date).days <= 7:
                 pub_date = today
                 
+            provider = content.get("provider") or {}
+            click_url = content.get("clickThroughUrl") or {}
+                
             headlines.append({
                 "date": pub_date,
-                "headline": title
+                "headline": title,
+                "publisher": provider.get("displayName", "") if isinstance(provider, dict) else "",
+                "link": click_url.get("url", "") if isinstance(click_url, dict) else ""
             })
 
     # Fallback to company summary if no recent headlines
@@ -112,7 +121,9 @@ def get_real_headlines(ticker: str) -> list[dict]:
             if summary:
                 headlines.append({
                     "date": today,
-                    "headline": summary
+                    "headline": summary,
+                    "publisher": "Yahoo Finance (Fallback)",
+                    "link": f"https://finance.yahoo.com/quote/{ticker}"
                 })
                 print(f"[NLP] ✅ Fallback used: 1 abstract snippet extracted.")
         except Exception as e:

@@ -120,7 +120,7 @@ async def root():
 
 
 @app.get("/api/analyze/{ticker}")
-async def analyze_ticker(ticker: str, rows: int = 10):
+async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
     """
     Run the full pipeline for the given ticker and return
     the last N rows of enriched data as JSON.
@@ -131,7 +131,8 @@ async def analyze_ticker(ticker: str, rows: int = 10):
 
     Query Parameters
     ----------------
-    rows   : int – Number of trailing rows to return (default 10, max 100)
+    rows   : int – Number of trailing rows to return (default 30, max 100)
+    range  : str – Time range for the chart (1D, 1W, 1M, 1Y)
     """
     global finbert_classifier
 
@@ -139,10 +140,26 @@ async def analyze_ticker(ticker: str, rows: int = 10):
     rows = max(1, min(rows, 100))
     ticker = ticker.upper()
 
+    # Map range to yfinance period and interval
+    # We fetch extra data (fetch_period) so MACD/RSI dropna() doesn't eat our required timeframe.
+    range_map = {
+        "1D": {"fetch_period": "5d", "interval": "5m", "bars": 78},
+        "1W": {"fetch_period": "1mo", "interval": "1h", "bars": 35},
+        "1M": {"fetch_period": "3mo", "interval": "1d", "bars": 22},
+        "1Y": {"fetch_period": "2y", "interval": "1d", "bars": 252}
+    }
+    
+    range_key = range.upper()
+    if range_key not in range_map:
+        range_key = "1M"
+        
+    yf_params = range_map[range_key]
+    target_rows = yf_params["bars"]
+
     try:
         # ── Step 1: Fetch OHLCV data ──
-        print(f"\n📡 [API] Request received for ticker: {ticker}")
-        raw_data = fetch_stock_data(ticker)
+        print(f"\n📡 [API] Request received for ticker: {ticker} (Range: {range_key})")
+        raw_data = fetch_stock_data(ticker, period=yf_params["fetch_period"], interval=yf_params["interval"])
 
         # ── Step 2: Technical indicators ──
         enriched = add_technical_indicators(raw_data)
@@ -160,11 +177,18 @@ async def analyze_ticker(ticker: str, rows: int = 10):
         forecast_result = generate_forecast(final_df, force_mock=True)
 
         # ── Step 6: Build JSON response ──
-        records = dataframe_to_json_records(final_df, n_rows=rows)
+        records = dataframe_to_json_records(final_df, n_rows=target_rows)
         
         # ── Step 7: Recent News Extraction ──
-        # Extract the highest 5 strings from the headline items
-        recent_news_list = [h.get("headline", "") for h in headlines[:5]]
+        # Extract the highest 5 items from the headlines
+        recent_news_list = [
+            {
+                "title": h.get("headline", ""),
+                "publisher": h.get("publisher", ""),
+                "link": h.get("link", "")
+            }
+            for h in headlines[:5]
+        ]
 
         return {
             "status": "success",
@@ -180,7 +204,61 @@ async def analyze_ticker(ticker: str, rows: int = 10):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+
+@app.get("/api/market_summary")
+async def get_market_summary():
+    """
+    Fetch the latest price and daily percentage change for key market indicators.
+    Returns a compact JSON list for a frontend Marquee/Ticker.
+    """
+    targets = [
+        {"symbol": "USD/TRY", "ticker": "TRY=X"},
+        {"symbol": "EUR/TRY", "ticker": "EURTRY=X"},
+        {"symbol": "GOLD (Ons)", "ticker": "GC=F"},
+        {"symbol": "BIST 100", "ticker": "XU100.IS"}
+    ]
+    
+    results = []
+    
+    try:
+        for t in targets:
+            # We use yfinance Ticker to fetch the daily change efficiently
+            import yfinance as yf
+            stock = yf.Ticker(t["ticker"])
+            
+            # Use 'fast_info' for quick access to the latest price and previous close
+            try:
+                info = stock.fast_info
+                current_price = info.last_price
+                previous_close = info.previous_close
+                if current_price and previous_close:
+                    change_pct = ((current_price - previous_close) / previous_close) * 100
+                else: # Fallback to history if fast_info fails
+                   hist = stock.history(period="2d")
+                   if len(hist) >= 2:
+                       current_price = hist['Close'].iloc[-1]
+                       previous_close = hist['Close'].iloc[-2]
+                       change_pct = ((current_price - previous_close) / previous_close) * 100
+                   else:
+                       continue
+            except Exception as e:
+                print(f"[API] Error fetching summary for {t['symbol']}: {e}")
+                continue
+                
+            results.append({
+                "symbol": t["symbol"],
+                "price": round(current_price, 2) if current_price else 0.0,
+                "change_pct": round(change_pct, 2) if change_pct is not None else 0.0
+            })
+            
+        return {"status": "success", "data": results}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Market summary error: {str(e)}")
 
 
 # ─────────────────────────────────────────────

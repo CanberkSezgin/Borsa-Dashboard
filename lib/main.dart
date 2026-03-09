@@ -4,6 +4,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 // ─────────────────────────────────────────────────────────────────
 //  DESIGN TOKENS — Premium Light Theme
@@ -130,6 +132,95 @@ String get _baseUrl {
 String _pad(int n) => n.toString().padLeft(2, '0');
 
 // ─────────────────────────────────────────────────────────────────
+//  MARKET MARQUEE COMPONENT
+// ─────────────────────────────────────────────────────────────────
+class _MarketMarquee extends StatefulWidget {
+  final List<dynamic> items;
+  const _MarketMarquee({required this.items});
+
+  @override
+  State<_MarketMarquee> createState() => _MarketMarqueeState();
+}
+
+class _MarketMarqueeState extends State<_MarketMarquee> with SingleTickerProviderStateMixin {
+  late ScrollController _scrollController;
+  Timer? _scrollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _startScrolling();
+  }
+
+  void _startScrolling() {
+    _scrollTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (_scrollController.hasClients) {
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.offset;
+        
+        if (currentScroll >= maxScroll) {
+          _scrollController.jumpTo(0);
+        } else {
+          _scrollController.jumpTo(currentScroll + 1);
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollTimer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.items.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: _DS.textMuted.withValues(alpha: 0.1), width: 1)),
+      ),
+      child: ListView.builder(
+        controller: _scrollController,
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(), // Auto-scroll only
+        itemBuilder: (context, index) {
+          // Infinite loop effect
+          final item = widget.items[index % widget.items.length];
+          final symbol = item['symbol'] as String;
+          final price = (item['price'] as num).toDouble();
+          final change = (item['change_pct'] as num).toDouble();
+          
+          final isPositive = change >= 0;
+          final color = isPositive ? _DS.emerald : _DS.crimson;
+          final icon = isPositive ? Icons.arrow_upward : Icons.arrow_downward;
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(symbol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: _DS.textSecondary)),
+                const SizedBox(width: 8),
+                Text(price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _DS.deepBlue)),
+                const SizedBox(width: 4),
+                Icon(icon, size: 12, color: color),
+                Text('${change.abs().toStringAsFixed(2)}%', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: color)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  ENTRY POINT
 // ─────────────────────────────────────────────────────────────────
 void main() {
@@ -184,18 +275,44 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final TextEditingController _tickerCtrl = TextEditingController(text: 'AAPL');
+  final TextEditingController _tickerCtrl = TextEditingController();
   
   bool _loading = false;
+  String _selectedRange = '1M';
   String? _error;
   Map<String, dynamic>? _data;
+  List<dynamic>? _dataList;
   Map<String, dynamic>? _forecast; 
-  List<String>? _recentNews; 
+  List<Map<String, dynamic>>? _recentNews; 
+  List<dynamic> _marketSummary = [];
 
   Timer? _refreshTimer; 
   DateTime? _lastFetchTime; 
 
   String t(String key) => _l10n[widget.lang]![key] ?? key;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMarketSummary();
+  }
+
+  Future<void> _fetchMarketSummary() async {
+    try {
+      final uri = Uri.parse('$_baseUrl/api/market_summary');
+      final response = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+         final body = jsonDecode(response.body);
+         if (mounted) {
+           setState(() {
+             _marketSummary = body['data'] as List<dynamic>;
+           });
+         }
+      }
+    } catch (_) {
+      // Fail silently for the marquee so it doesn't break the main UI
+    }
+  }
 
   @override
   void dispose() {
@@ -214,6 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _loading = true;
         _error = null;
         _data = null;
+        _dataList = null;
         _forecast = null;
         _recentNews = null;
         _lastFetchTime = null;
@@ -221,7 +339,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      final uri = Uri.parse('$_baseUrl/api/analyze/$ticker');
+      final uri = Uri.parse('$_baseUrl/api/analyze/$ticker?range=$_selectedRange');
       final response = await http.get(uri).timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
@@ -233,8 +351,9 @@ class _HomeScreenState extends State<HomeScreen> {
         } else {
           setState(() {
             _data = dataList.last as Map<String, dynamic>;
+            _dataList = dataList;
             _forecast = body['forecast'] as Map<String, dynamic>?;
-            _recentNews = (body['recent_news'] as List<dynamic>?)?.map((e) => e.toString()).toList();
+            _recentNews = (body['recent_news'] as List<dynamic>?)?.map((e) => e as Map<String, dynamic>).toList();
             _lastFetchTime = DateTime.now();
           });
 
@@ -267,6 +386,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onToggleLang: widget.onToggleLang,
               lastFetchTime: _lastFetchTime,
             ),
+            if (_marketSummary.isNotEmpty) 
+              _MarketMarquee(items: _marketSummary),
             Expanded(
               child: Center(
                 child: ConstrainedBox(
@@ -324,10 +445,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 600),
-                            child: _TechnicalSection(
-                               key: ValueKey('tech_${_lastFetchTime?.millisecondsSinceEpoch}'),
-                               data: _data!,
+                            child: _ProChartSection(
+                               key: ValueKey('chart_${_selectedRange}_${_lastFetchTime?.millisecondsSinceEpoch}'),
+                               dataList: _dataList!,
+                               forecast: _forecast,
                                lang: widget.lang,
+                               selectedRange: _selectedRange,
+                               onRangeChanged: (val) {
+                                 setState(() => _selectedRange = val);
+                                 _analyze();
+                               },
                             ),
                           ),
 
@@ -802,179 +929,248 @@ class _ScorePill extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  TECHNICAL SECTION
+//  PRO CHART SECTION (fl_chart)
 // ─────────────────────────────────────────────────────────────────
-class _TechnicalSection extends StatelessWidget {
-  final Map<String, dynamic> data;
+class _ProChartSection extends StatelessWidget {
+  final List<dynamic> dataList;
+  final Map<String, dynamic>? forecast;
   final String lang;
+  final String selectedRange;
+  final ValueChanged<String> onRangeChanged;
 
-  const _TechnicalSection({super.key, required this.data, required this.lang});
+  const _ProChartSection({
+    super.key,
+    required this.dataList,
+    this.forecast,
+    required this.lang,
+    required this.selectedRange,
+    required this.onRangeChanged,
+  });
 
   String t(String key) => _l10n[lang]![key] ?? key;
 
   @override
   Widget build(BuildContext context) {
-    final close = (data['Close'] as num?)?.toDouble();
-    final rsi = (data['RSI_14'] as num?)?.toDouble() ?? 50.0;
-    final macd = (data['MACD'] as num?)?.toDouble();
+    if (dataList.isEmpty) return const SizedBox.shrink();
 
-    final rsiColor = rsi > 70 ? _DS.crimson : (rsi < 30 ? _DS.emerald : _DS.deepBlue);
-    final rsiSignal = rsi > 70 ? t('overbought') : (rsi < 30 ? t('oversold') : null);
+    // 1. Prepare Historical Points
+    final List<FlSpot> spots = [];
+    double minY = double.infinity;
+    double maxY = double.negativeInfinity;
 
-    final macdBullish = macd != null && macd >= 0;
-    final macdColor = macdBullish ? _DS.emerald : _DS.crimson;
-    final macdSignal = macd != null ? (macdBullish ? '▲ Bullish' : '▼ Bearish') : null;
+    for (int i = 0; i < dataList.length; i++) {
+        final point = dataList[i];
+        final close = (point['Close'] as num?)?.toDouble() ?? 0.0;
+        
+        if (close > 0) {
+           spots.add(FlSpot(i.toDouble(), close));
+           if (close < minY) minY = close;
+           if (close > maxY) maxY = close;
+        }
+    }
+
+    // 2. Prepare Prediction Point
+    FlSpot? predSpot;
+    Color predColor = _DS.neutral;
+    
+    if (forecast != null && forecast!['target_price'] != null && spots.isNotEmpty) {
+       final targetPrice = (forecast!['target_price'] as num).toDouble();
+       final lastX = spots.last.x;
+       predSpot = FlSpot(lastX + 1, targetPrice);
+       
+       if (targetPrice < minY) minY = targetPrice;
+       if (targetPrice > maxY) maxY = targetPrice;
+       
+       final label = forecast!['forecast_label'] as String? ?? '';
+       final isBullish = label.toLowerCase().contains("up") || label.toLowerCase().contains("bull");
+       predColor = isBullish ? _DS.emerald : _DS.crimson;
+    }
+
+    // Add padding to Y axis so the chart doesn't touch the edges completely
+    final yPadding = (maxY - minY) * 0.1;
+    if (yPadding == 0) {
+      minY -= 1;
+      maxY += 1;
+    } else {
+      minY -= yPadding;
+      maxY += yPadding;
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 12),
-          child: Text(t('technical').toUpperCase(),
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: _DS.textMuted,
-                  letterSpacing: 1.5)),
-        ),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          childAspectRatio: 1.15,
-          children: [
-            _TechCard(
-              label: t('priceCard'),
-              value: close,
-              prefix: '\$',
-              decimals: 2,
-              icon: Icons.attach_money,
-              color: _DS.deepBlue,
-            ),
-            _TechCard(
-              label: t('rsiCard'),
-              value: rsi,
-              decimals: 1,
-              sublabel: rsiSignal,
-              icon: Icons.speed,
-              color: rsiColor,
-              progressValue: rsi / 100,
-            ),
-            _TechCard(
-              label: t('macdCard'),
-              value: macd,
-              decimals: 4,
-              sublabel: macdSignal,
-              icon: Icons.show_chart,
-              color: macdColor,
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _TechCard extends StatelessWidget {
-  final String label;
-  final double? value;
-  final String prefix;
-  final int decimals;
-  final String? sublabel;
-  final IconData icon;
-  final Color color;
-  final double? progressValue;
-
-  const _TechCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-    this.prefix = '',
-    this.decimals = 2,
-    this.sublabel,
-    this.progressValue,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _PremiumCard(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: _DS.textSecondary,
-                        fontWeight: FontWeight.w600)),
-              ),
-            ]),
-            const SizedBox(height: 12),
-            if (value != null)
-              TweenAnimationBuilder<double>(
-                 tween: Tween<double>(begin: 0, end: value!),
-                 duration: const Duration(milliseconds: 1200),
-                 curve: Curves.easeOutCubic,
-                 builder: (_, val, __) => Text(
-                   '$prefix${val.toStringAsFixed(decimals)}',
-                   style: TextStyle(
-                       fontSize: 24,
-                       fontWeight: FontWeight.w800,
-                       color: color),
+          child: Row(
+            children: [
+              Text(t('technical').toUpperCase(),
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: _DS.textMuted,
+                      letterSpacing: 1.5)),
+              const Spacer(),
+              if (forecast != null)
+                 Row(
+                   children: [
+                     Container(width: 8, height: 2, color: predColor),
+                     const SizedBox(width: 4),
+                     Text('AI TARGET', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: predColor)),
+                   ],
                  ),
-              )
-            else
-              Text('--', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-            
-            if (sublabel != null || progressValue != null) ...[
-               const SizedBox(height: 10),
-               Row(children: [
-                  if (sublabel != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            ],
+          ),
+        ),
+        
+        // Time Range Toggles
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Row(
+            children: ['1D', '1W', '1M', '1Y'].map((r) {
+              final isActive = r == selectedRange;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onRangeChanged(r),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
+                        color: isActive ? _DS.deepBlue.withValues(alpha: 0.08) : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(sublabel!,
-                          style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w700)),
-                    ),
-                  if (progressValue != null)
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: TweenAnimationBuilder<double>(
-                           tween: Tween<double>(begin: 0, end: progressValue!),
-                           duration: const Duration(milliseconds: 1400),
-                           curve: Curves.easeOutCubic,
-                           builder: (_, val, __) => ClipRRect(
-                             borderRadius: BorderRadius.circular(4),
-                             child: LinearProgressIndicator(
-                               value: val,
-                               minHeight: 4,
-                               backgroundColor: color.withValues(alpha: 0.15),
-                               valueColor: AlwaysStoppedAnimation<Color>(color),
-                             ),
-                           ),
+                      child: Text(
+                        r,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                          color: isActive ? _DS.deepBlue : _DS.textMuted,
                         ),
                       ),
                     ),
-               ]),
-            ],
-          ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
         ),
-      ),
+        
+        _PremiumCard(
+          child: Container(
+            height: 280,
+            padding: const EdgeInsets.only(right: 24, left: 16, top: 32, bottom: 16),
+            child: LineChart(
+              LineChartData(
+                minX: 0,
+                maxX: predSpot != null ? spots.last.x + 1 : spots.last.x,
+                minY: minY,
+                maxY: maxY,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: (maxY - minY) / 4,
+                  getDrawingHorizontalLine: (value) {
+                    return FlLine(
+                      color: _DS.textMuted.withValues(alpha: 0.15),
+                      strokeWidth: 1,
+                      dashArray: [5, 5],
+                    );
+                  },
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 42,
+                      getTitlesWidget: (value, meta) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: Text(
+                            '\$${value.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              color: _DS.textMuted,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  // Historical Line
+                  LineChartBarData(
+                    spots: spots,
+                    isCurved: true,
+                    curveSmoothness: 0.2,
+                    color: _DS.deepBlue,
+                    barWidth: 3,
+                    isStrokeCapRound: true,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        colors: [
+                          _DS.deepBlue.withValues(alpha: 0.15),
+                          _DS.deepBlue.withValues(alpha: 0.0),
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
+                  ),
+                  // Prediction Line (Connecting last historical point to target)
+                  if (predSpot != null && spots.isNotEmpty)
+                    LineChartBarData(
+                       spots: [spots.last, predSpot],
+                       isCurved: false,
+                       color: predColor,
+                       barWidth: 3,
+                       isStrokeCapRound: true,
+                       dashArray: [5, 5],
+                       dotData: FlDotData(
+                          show: true,
+                          getDotPainter: (spot, percent, barData, index) {
+                             if (index == 1) { // Only show dot on the final target prediction
+                               return FlDotCirclePainter(
+                                 radius: 5,
+                                 color: Colors.white,
+                                 strokeWidth: 3,
+                                 strokeColor: predColor,
+                               );
+                             }
+                             return FlDotCirclePainter(radius: 0, color: Colors.transparent);
+                          },
+                       ),
+                    ),
+                ],
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (touchedSpots) {
+                      return touchedSpots.map((spot) {
+                        return LineTooltipItem(
+                           '\$${spot.y.toStringAsFixed(2)}',
+                           const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+              ),
+              duration: const Duration(milliseconds: 800),
+              curve: Curves.easeInOutCubic,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -983,7 +1179,7 @@ class _TechCard extends StatelessWidget {
 //  RECENT NEWS SECTION
 // ─────────────────────────────────────────────────────────────────
 class _RecentNewsSection extends StatelessWidget {
-  final List<String> news;
+  final List<Map<String, dynamic>> news;
   final String lang;
 
   const _RecentNewsSection({super.key, required this.news, required this.lang});
@@ -1015,43 +1211,73 @@ class _RecentNewsSection extends StatelessWidget {
              ),
            )
         else
-           ...news.map((headline) => Padding(
-                 padding: const EdgeInsets.only(bottom: 12),
-                 child: _PremiumCard(
-                   child: Padding(
-                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                     child: Row(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Container(
-                           padding: const EdgeInsets.all(10),
-                           decoration: BoxDecoration(
-                             color: _DS.surfaceAlt,
-                             borderRadius: BorderRadius.circular(12),
-                             border: Border.all(color: Colors.white, width: 1.5),
-                             boxShadow: [
-                               BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))
-                             ],
+           ...news.map((item) {
+             final title = item['title'] as String? ?? '';
+             final publisher = item['publisher'] as String? ?? '';
+             final link = item['link'] as String? ?? '';
+
+             return Padding(
+               padding: const EdgeInsets.only(bottom: 12),
+               child: _PremiumCard(
+                 child: Material(
+                   color: Colors.transparent,
+                   child: InkWell(
+                     onTap: link.isNotEmpty ? () => launchUrl(Uri.parse(link)) : null,
+                     child: Padding(
+                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                       child: Row(
+                         crossAxisAlignment: CrossAxisAlignment.start,
+                         children: [
+                           Container(
+                             padding: const EdgeInsets.all(10),
+                             decoration: BoxDecoration(
+                               color: _DS.surfaceAlt,
+                               borderRadius: BorderRadius.circular(12),
+                               border: Border.all(color: Colors.white, width: 1.5),
+                               boxShadow: [
+                                 BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))
+                               ],
+                             ),
+                             child: const Icon(Icons.article_rounded, color: _DS.deepBlue, size: 20),
                            ),
-                           child: const Icon(Icons.article_rounded, color: _DS.deepBlue, size: 20),
-                         ),
-                         const SizedBox(width: 16),
-                         Expanded(
-                           child: Text(
-                             headline,
-                             style: const TextStyle(
-                               color: _DS.textPrimary,
-                               fontSize: 14,
-                               fontWeight: FontWeight.w600,
-                               height: 1.4,
+                           const SizedBox(width: 16),
+                           Expanded(
+                             child: Column(
+                               crossAxisAlignment: CrossAxisAlignment.start,
+                               children: [
+                                 Text(
+                                   title,
+                                   style: const TextStyle(
+                                     color: _DS.textPrimary,
+                                     fontSize: 14,
+                                     fontWeight: FontWeight.w600,
+                                     height: 1.4,
+                                   ),
+                                 ),
+                                 if (publisher.isNotEmpty)
+                                   Padding(
+                                     padding: const EdgeInsets.only(top: 6),
+                                     child: Text(
+                                       publisher.toUpperCase(),
+                                       style: TextStyle(
+                                         color: _DS.textMuted,
+                                         fontSize: 10,
+                                         fontWeight: FontWeight.w800,
+                                         letterSpacing: 1.0,
+                                       ),
+                                     ),
+                                   ),
+                               ],
                              ),
                            ),
-                         ),
-                       ],
+                         ],
+                       ),
                      ),
                    ),
                  ),
-               )).toList(),
+               ),
+             );
+           }).toList(),
       ],
     );
   }

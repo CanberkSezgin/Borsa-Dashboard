@@ -134,9 +134,16 @@ def generate_forecast(df: pd.DataFrame, force_mock: bool = True) -> dict:
         label = "Upward Trend" if prob >= 0.5 else "Downward Trend"
         print(f"[LSTM] ✅ Forecast complete. Probability of Up: {prob:.2f}")
         
+        # 5. Calculate Target Price (for visualization)
+        # Apply a modest percentage move (e.g. +/- 1.5% max based on probability)
+        current_price = latest.get("Close", 0)
+        move_pct = (prob - 0.5) * 0.03 # Max 1.5% move up or down
+        target_price = current_price * (1 + move_pct)
+        
         return {
             "prediction_score": round(prob, 4),
-            "forecast_label": label
+            "forecast_label": label,
+            "target_price": round(target_price, 2)
         }
     
     # ── Actual Training Path (Slow) ──
@@ -164,7 +171,13 @@ def generate_forecast(df: pd.DataFrame, force_mock: bool = True) -> dict:
     label = "Upward Trend" if pred_prob >= 0.5 else "Downward Trend"
     print(f"[LSTM] ✅ Deep Forecast complete. Probability of Up: {pred_prob:.2f}")
     
+    # 5. Calculate Target Price
+    current_price = df.iloc[-1].get("Close", 0)
+    move_pct = (pred_prob - 0.5) * 0.03
+    target_price = current_price * (1 + move_pct)
+    
     return {
         "prediction_score": round(float(pred_prob), 4),
-        "forecast_label": label
+        "forecast_label": label,
+        "target_price": round(float(target_price), 2)
     }
