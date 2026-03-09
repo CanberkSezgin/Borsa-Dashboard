@@ -1,16 +1,18 @@
-# borsa_dashboard
+#  Autonomous AI Finance Terminal
 
-A new Flutter project.
+A full-stack, real-time financial dashboard that leverages deep learning and natural language processing to analyze market trends. Built with a Flutter frontend and a Python/FastAPI backend.
 
-## Getting Started
+##  Features
 
-This project is a starting point for a Flutter application.
+* **Live Auto-Pilot (Otonom Yenileme):** Automatically fetches and refreshes market data, news, and predictions every 3 minutes.
+* **AI Price Forecasting (LSTM):** Utilizes a Long Short-Term Memory neural network (built with TensorFlow/Keras) to predict short-term price movements based on historical data.
+* **Sentiment Analysis (FinBERT):** Scrapes real-time financial news and processes headlines through a specialized HuggingFace NLP model to gauge market sentiment (Bullish/Bearish).
+* **Real-time Technical Indicators:** Calculates and visualizes RSI (14) and MACD instantly.
+* **Premium UI/UX:** A minimalist, light-themed institutional-grade dashboard featuring state-of-the-art animations.
 
-A few resources to get you started if this is your first Flutter project:
+##  Tech Stack
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+* **Frontend:** Flutter (Dart)
+* **Backend:** Python, FastAPI, Uvicorn
+* **Machine Learning:** TensorFlow, Scikit-learn, HuggingFace Transformers (FinBERT)
+* **Data Sources:** `yfinance` API
