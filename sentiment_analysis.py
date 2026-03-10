@@ -11,8 +11,11 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-import yfinance as yf
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
 
 
 # ─────────────────────────────────────────────
@@ -27,6 +30,10 @@ def load_finbert_pipeline():
     -------
     transformers.Pipeline – ready-to-use classifier
     """
+    if not TRANSFORMERS_AVAILABLE:
+        print("[NLP] ⚠️ Transformers library not installed. Running in mock/lightweight mode.")
+        return None
+
     print("[NLP] Loading ProsusAI/FinBERT model (first run will download ~440 MB) …")
 
     model_name = "ProsusAI/finbert"
@@ -158,23 +165,30 @@ def classify_headlines(classifier, headlines: list[dict]) -> pd.DataFrame:
         return pd.DataFrame(columns=["Date", "Headline", "Positive", "Negative", "Neutral", "Dominant_Sentiment"])
 
     records = []
-    for item in headlines:
-        result = classifier(item["headline"])
-
-        # result is a list of lists; flatten to a dict keyed by label
-        scores = {entry["label"]: round(entry["score"], 4) for entry in result[0]}
-
-        # Determine the dominant sentiment
-        dominant = max(scores, key=scores.get)
-
-        records.append({
-            "Date": pd.Timestamp(item["date"]),
-            "Headline": item["headline"],
-            "Positive": scores.get("positive", 0.0),
-            "Negative": scores.get("negative", 0.0),
-            "Neutral": scores.get("neutral", 0.0),
-            "Dominant_Sentiment": dominant,
-        })
+    if classifier is None:
+        print("[NLP] ⚠️ Classifier is None. Returning MOCK sentiment data.")
+        for item in headlines:
+            records.append({
+                "Date": pd.Timestamp(item["date"]),
+                "Headline": item["headline"],
+                "Positive": 0.33,
+                "Negative": 0.33,
+                "Neutral": 0.34,
+                "Dominant_Sentiment": "neutral",
+            })
+    else:
+        for item in headlines:
+            result = classifier(item["headline"])
+            scores = {entry["label"]: round(entry["score"], 4) for entry in result[0]}
+            dominant = max(scores, key=scores.get)
+            records.append({
+                "Date": pd.Timestamp(item["date"]),
+                "Headline": item["headline"],
+                "Positive": scores.get("positive", 0.0),
+                "Negative": scores.get("negative", 0.0),
+                "Neutral": scores.get("neutral", 0.0),
+                "Dominant_Sentiment": dominant,
+            })
 
     df = pd.DataFrame(records)
     print(f"[NLP] ✅ Classified {len(df)} headlines.\n")

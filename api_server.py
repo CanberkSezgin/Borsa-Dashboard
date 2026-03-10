@@ -32,21 +32,6 @@ from lstm_forecast import generate_forecast
 finbert_classifier = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Load the FinBERT model into memory when the server starts,
-    so it is ready before the first request arrives.
-    """
-    global finbert_classifier
-    print("\n🚀 [STARTUP] Loading FinBERT model — please wait …")
-    finbert_classifier = load_finbert_pipeline()
-    print("🚀 [STARTUP] Model ready. Server is accepting requests.\n")
-    yield
-    # Cleanup on shutdown (nothing to do for now)
-    print("\n🛑 [SHUTDOWN] Server is shutting down.")
-
-
 # ─────────────────────────────────────────────
 #  1. APP INITIALISATION
 # ─────────────────────────────────────────────
@@ -57,7 +42,6 @@ app = FastAPI(
         "(RSI, MACD, EMA) and FinBERT-powered sentiment scores."
     ),
     version="1.0.0",
-    lifespan=lifespan,
 )
 
 
@@ -135,6 +119,8 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
     range  : str – Time range for the chart (1D, 1W, 1M, 1Y)
     """
     global finbert_classifier
+    if finbert_classifier is None:
+        finbert_classifier = load_finbert_pipeline()
 
     # Clamp requested rows
     rows = max(1, min(rows, 100))
@@ -214,6 +200,8 @@ async def get_market_summary():
     Fetch the latest price and daily percentage change for key market indicators.
     Returns a compact JSON list for a frontend Marquee/Ticker.
     """
+    import yfinance as yf
+
     targets = [
         {"symbol": "USD/TRY", "ticker": "TRY=X"},
         {"symbol": "EUR/TRY", "ticker": "EURTRY=X"},
@@ -225,36 +213,39 @@ async def get_market_summary():
     
     try:
         for t in targets:
-            # We use yfinance Ticker to fetch the daily change efficiently
-            import yfinance as yf
-            stock = yf.Ticker(t["ticker"])
-            
-            # Use 'fast_info' for quick access to the latest price and previous close
             try:
+                stock = yf.Ticker(t["ticker"])
                 info = stock.fast_info
                 current_price = info.last_price
                 previous_close = info.previous_close
+                
                 if current_price and previous_close:
                     change_pct = ((current_price - previous_close) / previous_close) * 100
-                else: # Fallback to history if fast_info fails
-                   hist = stock.history(period="2d")
-                   if len(hist) >= 2:
-                       current_price = hist['Close'].iloc[-1]
-                       previous_close = hist['Close'].iloc[-2]
-                       change_pct = ((current_price - previous_close) / previous_close) * 100
-                   else:
-                       continue
+                else:
+                    hist = stock.history(period="2d")
+                    if len(hist) >= 2:
+                        current_price = hist['Close'].iloc[-1]
+                        previous_close = hist['Close'].iloc[-2]
+                        change_pct = ((current_price - previous_close) / previous_close) * 100
+                    else:
+                        continue
+                
+                if current_price:
+                    results.append({
+                        "symbol": t["symbol"],
+                        "price": round(current_price, 2),
+                        "change_pct": round(change_pct, 2)
+                    })
             except Exception as e:
                 print(f"[API] Error fetching summary for {t['symbol']}: {e}")
                 continue
-                
-            results.append({
-                "symbol": t["symbol"],
-                "price": round(current_price, 2) if current_price else 0.0,
-                "change_pct": round(change_pct, 2) if change_pct is not None else 0.0
-            })
-            
+
         return {"status": "success", "data": results}
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Market summary error: {str(e)}")
     except Exception as e:
         import traceback
         traceback.print_exc()

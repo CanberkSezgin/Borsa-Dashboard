@@ -11,9 +11,13 @@
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import LSTM, Dense, Dropout
+    TF_AVAILABLE = True
+except ImportError:
+    TF_AVAILABLE = False
 
 def prepare_lstm_data(df: pd.DataFrame, seq_length: int = 60):
     """
@@ -66,6 +70,10 @@ def build_lstm_model(input_shape):
     """
     Defines a simple LSTM architecture for sequence classification.
     """
+    if not TF_AVAILABLE:
+        print("[LSTM] ⚠️ TensorFlow not installed. Cannot build real LSTM architecture.")
+        return None
+        
     print("[LSTM] Building LSTM Architecture ...")
     model = Sequential([
         LSTM(50, return_sequences=True, input_shape=input_shape),
@@ -98,7 +106,7 @@ def generate_forecast(df: pd.DataFrame, force_mock: bool = True) -> dict:
           and 'forecast_label' ("Upward" / "Downward").
     """
     
-    if force_mock or len(df) < 65:
+    if not TF_AVAILABLE or force_mock or len(df) < 65:
         # ── Fast-Path / Mock Prediction ──
         # In production this would load a pre-trained .h5 model.
         # For immediate API feedback, we synthesize a realistic score 
