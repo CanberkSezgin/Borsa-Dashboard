@@ -262,57 +262,43 @@ def merge_sentiment_into_ohlcv(ohlcv_df: pd.DataFrame,
 
     Strategy:
         • Normalise both indices to date-only for a left-join.
-        • Forward-fill so that every intraday bar on a given date
-          inherits that day's sentiment. Days without news stay NaN
-          (which can later be filled with 0 or a neutral default).
-
-    Parameters
-    ----------
-    ohlcv_df         : pd.DataFrame – price DataFrame (e.g. from yfinance)
-    daily_sentiment  : pd.DataFrame – output of aggregate_daily_sentiment()
-
-    Returns
-    -------
-    pd.DataFrame – original OHLCV data with sentiment columns appended.
+        • Fill NaN days with neutral (0.0).
     """
     print("\n[NLP] Merging sentiment into OHLCV DataFrame …")
 
-    # Instead of strict date joining which misses on weekends/holidays,
-    # we calculate the global average sentiment of ALL fetched news 
-    # and broadcast it to the entire OHLCV dataframe.
-    
     merged = ohlcv_df.copy()
     
-    if daily_sentiment.empty:
-        # Fallback to neutral if literally no sentiments exist
-        merged["Sent_Positive"] = 0.0
-        merged["Sent_Negative"] = 0.0
-        merged["Sent_Neutral"] = 1.0
-        merged["Headline_Count"] = 0
-        merged["Sentiment_Score"] = 0.0
-    else:
-        avg_pos = daily_sentiment["Sent_Positive"].mean()
-        avg_neg = daily_sentiment["Sent_Negative"].mean()
-        avg_neu = daily_sentiment["Sent_Neutral"].mean()
-        total_count = daily_sentiment["Headline_Count"].sum()
-        
-        # Recalculate global composite score
-        avg_score = round(avg_pos - avg_neg, 4)
-        
-        merged["Sent_Positive"] = round(avg_pos, 4)
-        merged["Sent_Negative"] = round(avg_neg, 4)
-        merged["Sent_Neutral"] = round(avg_neu, 4)
-        merged["Headline_Count"] = int(total_count)
-        merged["Sentiment_Score"] = avg_score
+    # 1. Create a temporary 'MergeDate' column in the OHLCV data
+    # (yfinance index is usually 'Datetime' with timezone)
+    merged['MergeDate'] = pd.to_datetime(merged.index).date
+    
+    # 2. Ensure daily_sentiment index is also date-only
+    daily_sentiment_copy = daily_sentiment.copy()
+    daily_sentiment_copy['MergeDate'] = pd.to_datetime(daily_sentiment_copy.index).date
+    
+    # 3. Perform the join
+    merged = merged.merge(
+        daily_sentiment_copy, 
+        on='MergeDate', 
+        how='left'
+    )
+    
+    # 4. Fill gaps with Neutral values (so we don't have NaNs in the LSTM)
+    merged["Sent_Positive"] = merged["Sent_Positive"].fillna(0.0)
+    merged["Sent_Negative"] = merged["Sent_Negative"].fillna(0.0)
+    merged["Sent_Neutral"] = merged["Sent_Neutral"].fillna(1.0)
+    merged["Headline_Count"] = merged["Headline_Count"].fillna(0).astype(int)
+    merged["Sentiment_Score"] = merged["Sentiment_Score"].fillna(0.0)
+    
+    # Restore the original index
+    merged.index = ohlcv_df.index
+    merged.drop(columns=['MergeDate'], inplace=True)
 
     sent_cols = ["Sent_Positive", "Sent_Negative", "Sent_Neutral",
                  "Headline_Count", "Sentiment_Score"]
-    print(f"[NLP] ✅ Broad Average Merge complete. New columns: {sent_cols}")
-    print(f"[NLP]    DataFrame shape: {merged.shape}")
-    print("\n[NLP] ── DIAGNOSTIC PRINT (First 5 Rows) ──")
-    print(merged[["Close"] + sent_cols].head(5).to_string())
-    print("-" * 50)
-
+    print(f"[NLP] ✅ Time-aware Merge complete. New columns: {sent_cols}")
+    print(f"[NLP]    Matches found: {merged['Headline_Count'].sum()} total headlines across timeline.")
+    
     return merged
 
 

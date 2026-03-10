@@ -32,6 +32,21 @@ from lstm_forecast import generate_forecast
 finbert_classifier = None
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Load the FinBERT model into memory when the server starts,
+    so it is ready before the first request arrives.
+    """
+    global finbert_classifier
+    print("\n🚀 [STARTUP] Loading FinBERT model — please wait …")
+    finbert_classifier = load_finbert_pipeline()
+    print("🚀 [STARTUP] Model ready. Server is accepting requests.\n")
+    yield
+    # Cleanup on shutdown (nothing to do for now)
+    print("\n🛑 [SHUTDOWN] Server is shutting down.")
+
+
 # ─────────────────────────────────────────────
 #  1. APP INITIALISATION
 # ─────────────────────────────────────────────
@@ -42,6 +57,7 @@ app = FastAPI(
         "(RSI, MACD, EMA) and FinBERT-powered sentiment scores."
     ),
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -119,8 +135,6 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
     range  : str – Time range for the chart (1D, 1W, 1M, 1Y)
     """
     global finbert_classifier
-    if finbert_classifier is None:
-        finbert_classifier = load_finbert_pipeline()
 
     # Clamp requested rows
     rows = max(1, min(rows, 100))
