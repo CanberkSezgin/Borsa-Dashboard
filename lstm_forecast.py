@@ -106,7 +106,7 @@ def generate_forecast(df: pd.DataFrame, force_mock: bool = True) -> dict:
           and 'forecast_label' ("Upward" / "Downward").
     """
     
-    if not TF_AVAILABLE or force_mock or len(df) < 65:
+    if not TF_AVAILABLE or force_mock or len(df) < 20:
         # ── Fast-Path / Mock Prediction ──
         # In production this would load a pre-trained .h5 model.
         # For immediate API feedback, we synthesize a realistic score 
@@ -156,7 +156,8 @@ def generate_forecast(df: pd.DataFrame, force_mock: bool = True) -> dict:
     
     # ── Actual Training Path (Slow) ──
     # If forced_mock is False, we actually prep and train.
-    X, y, scaler, features = prepare_lstm_data(df, seq_length=60)
+    dynamic_seq = min(60, max(5, int(len(df) * 0.25)))
+    X, y, scaler, features = prepare_lstm_data(df, seq_length=dynamic_seq)
     
     if len(X) < 10:
         return {"prediction_score": 0.5, "forecast_label": "Insufficient Data"}
@@ -167,12 +168,12 @@ def generate_forecast(df: pd.DataFrame, force_mock: bool = True) -> dict:
     model.fit(X, y, epochs=3, batch_size=16, verbose=0)
     
     # Predict the NEXT step
-    # We take the very last 60 rows from our dataset to form a sequence
-    last_sequence = df[features].tail(60).ffill().bfill()
+    # We take the very last dynamic_seq rows from our dataset to form a sequence
+    last_sequence = df[features].tail(dynamic_seq).ffill().bfill()
     last_scaled = scaler.transform(last_sequence)
     
     # Reshape for LSTM (1, seq_length, features)
-    X_pred = last_scaled.reshape(1, 60, len(features))
+    X_pred = last_scaled.reshape(1, dynamic_seq, len(features))
     
     pred_prob = model.predict(X_pred, verbose=0)[0][0]
     
