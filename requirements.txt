@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 yfinance
-pandas==1.5.3
-pandas-ta==0.3.14b
+pandas
+git+https://github.com/twopirllc/pandas-ta.git@main
 plotly
 numpy
 scikit-learn
