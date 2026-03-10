@@ -214,6 +214,7 @@ async def get_market_summary():
     Fetch the latest price and daily percentage change for key market indicators.
     Returns a compact JSON list for a frontend Marquee/Ticker.
     """
+    import asyncio
     import yfinance as yf
 
     targets = [
@@ -223,43 +224,47 @@ async def get_market_summary():
         {"symbol": "BIST 100", "ticker": "XU100.IS"}
     ]
     
-    results = []
-    
-    try:
-        for t in targets:
+    def fetch_single(t):
+        try:
+            print(f"[API] Fetching market summary for {t['symbol']} ({t['ticker']})...")
+            stock = yf.Ticker(t["ticker"])
+            # Try fast_info first
             try:
-                stock = yf.Ticker(t["ticker"])
                 info = stock.fast_info
                 current_price = info.last_price
                 previous_close = info.previous_close
-                
-                if current_price and previous_close:
-                    change_pct = ((current_price - previous_close) / previous_close) * 100
+            except:
+                current_price = None
+                previous_close = None
+            
+            if not current_price or not previous_close:
+                hist = stock.history(period="2d")
+                if len(hist) >= 2:
+                    current_price = hist['Close'].iloc[-1]
+                    previous_close = hist['Close'].iloc[-2]
                 else:
-                    hist = stock.history(period="2d")
-                    if len(hist) >= 2:
-                        current_price = hist['Close'].iloc[-1]
-                        previous_close = hist['Close'].iloc[-2]
-                        change_pct = ((current_price - previous_close) / previous_close) * 100
-                    else:
-                        continue
-                
-                if current_price:
-                    results.append({
-                        "symbol": t["symbol"],
-                        "price": round(current_price, 2),
-                        "change_pct": round(change_pct, 2)
-                    })
-            except Exception as e:
-                print(f"[API] Error fetching summary for {t['symbol']}: {e}")
-                continue
+                    return None
+            
+            change_pct = ((current_price - previous_close) / previous_close) * 100
+            
+            return {
+                "symbol": t["symbol"],
+                "price": round(float(current_price), 2),
+                "change_pct": round(float(change_pct), 2)
+            }
+        except Exception as e:
+            print(f"[API] ⚠️ Error fetching {t['symbol']}: {e}")
+            return None
 
+    try:
+        # Run in parallel threads to avoid blocking the event loop
+        tasks = [asyncio.to_thread(fetch_single, t) for t in targets]
+        results_raw = await asyncio.gather(*tasks)
+        
+        results = [r for r in results_raw if r is not None]
+        print(f"[API] Market summary complete. Returns {len(results)} items.")
         return {"status": "success", "data": results}
         
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Market summary error: {str(e)}")
     except Exception as e:
         import traceback
         traceback.print_exc()

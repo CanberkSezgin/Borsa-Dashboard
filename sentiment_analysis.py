@@ -105,9 +105,9 @@ def get_real_headlines(ticker: str) -> list[dict]:
             except Exception:
                 continue
 
-            # If the news is from the last 7 days, attribute its sentiment to 'today'
-            # so that it correctly joins onto the latest OHLCV bar.
-            if (today - pub_date).days <= 7:
+            # We use the actual publication date for historical analysis.
+            # Only if the date is in the future (timezone issues), we clamp to today.
+            if pub_date > today:
                 pub_date = today
                 
             provider = content.get("provider") or {}
@@ -180,7 +180,12 @@ def classify_headlines(classifier, headlines: list[dict]) -> pd.DataFrame:
     else:
         for item in headlines:
             result = classifier(item["headline"])
-            scores = {entry["label"]: round(entry["score"], 4) for entry in result[0]}
+            # result[0] is a list of dicts like [{'label': 'positive', 'score': 0.9}, ...]
+            # LOG LABELS for debugging
+            if headlines.index(item) == 0:
+                print(f"[NLP] DEBUG: First headline raw output: {result[0]}")
+            
+            scores = {entry["label"].lower(): round(entry["score"], 4) for entry in result[0]}
             dominant = max(scores, key=scores.get)
             records.append({
                 "Date": pd.Timestamp(item["date"]),
@@ -283,7 +288,15 @@ def merge_sentiment_into_ohlcv(ohlcv_df: pd.DataFrame,
         how='left'
     )
     
-    # 4. Fill gaps with Neutral values (so we don't have NaNs in the LSTM)
+    # 4. Forward-fill so that a piece of news from Monday 
+    # continues to influence the 'mood' until the next piece of news.
+    merged.sort_values('MergeDate', inplace=True)
+    
+    # We forward fill the sentiment scores so the chart doesn't look empty
+    for col in ["Sent_Positive", "Sent_Negative", "Sent_Neutral", "Sentiment_Score"]:
+        merged[col] = merged[col].ffill()
+        
+    # Final fill for any remaining NaNs at the very start
     merged["Sent_Positive"] = merged["Sent_Positive"].fillna(0.0)
     merged["Sent_Negative"] = merged["Sent_Negative"].fillna(0.0)
     merged["Sent_Neutral"] = merged["Sent_Neutral"].fillna(1.0)
