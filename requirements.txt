@@ -3,3 +3,8 @@ uvicorn
 yfinance
 pandas
 pandas-ta-classic
+numpy
+scikit-learn
+tensorflow
+transformers
+torch
