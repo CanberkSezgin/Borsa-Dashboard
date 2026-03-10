@@ -2,7 +2,7 @@ fastapi==0.103.2
 uvicorn==0.23.2
 yfinance==0.2.31
 pandas==1.5.3
-pandas-ta==0.3.14b0
+pandas-ta @ https://github.com/twopirllc/pandas-ta/tarball/da43399
 plotly==5.17.0
 numpy==1.23.5
 scikit-learn==1.3.1
