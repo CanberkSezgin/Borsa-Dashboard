@@ -11,6 +11,7 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import yfinance as yf
 try:
     from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
     TRANSFORMERS_AVAILABLE = True
