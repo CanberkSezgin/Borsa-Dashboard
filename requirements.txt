@@ -2,7 +2,7 @@ fastapi
 uvicorn
 yfinance
 pandas
-git+https://github.com/twopirllc/pandas-ta.git@main
+pandas-ta-classic
 plotly
 numpy
 scikit-learn
