@@ -7,60 +7,11 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:fl_chart/fl_chart.dart';
 
-// ─────────────────────────────────────────────────────────────────
-//  DESIGN TOKENS — Premium Light Theme
-// ─────────────────────────────────────────────────────────────────
-class _DS {
-  static const bg = Color(0xFFFFFFFF);
-  static const surface = Color(0xFFF5F7FA);
-  static const surfaceAlt = Color(0xFFF1F5F9);
-  
-  static const deepBlue = Color(0xFF0F172A);
-  static const textPrimary = Color(0xFF1E293B);
-  static const textSecondary = Color(0xFF475569);
-  static const textMuted = Color(0xFF94A3B8);
-
-  static const emerald = Color(0xFF10B981);
-  static const emeraldSoft = Color(0xFFD1FAE5);
-  static const crimson = Color(0xFFEF4444);
-  static const crimsonSoft = Color(0xFFFEE2E2);
-  static const neutral = Color(0xFF64748B);
-  static const neutralSoft = Color(0xFFF1F5F9);
-
-  static const bullishGrad = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFECFDF5), Color(0xFFF0FDF4)],
-  );
-  static const bearishGrad = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFFEF2F2), Color(0xFFFFF1F2)],
-  );
-  static const neutralGrad = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFF8FAFC), Color(0xFFF1F5F9)],
-  );
-  static const cardGrad = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFFFFFFF), Color(0xFFF8FAFC)],
-  );
-
-  static List<BoxShadow> get neumorphicShadow => [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.04),
-          blurRadius: 16,
-          offset: const Offset(0, 4),
-        ),
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.02),
-          blurRadius: 4,
-          offset: const Offset(0, 2),
-        ),
-      ];
-}
+import 'design_tokens.dart';
+import 'screens/login_screen.dart';
+import 'screens/register_screen.dart';
+import 'screens/verify_screen.dart';
+import 'screens/avatar_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────
 //  LOCALISATION
@@ -90,6 +41,11 @@ const Map<String, Map<String, String>> _l10n = {
     'confidence': 'CONFIDENCE',
     'retry': 'Try Again',
     'noData': 'No data returned from API.',
+    'greeting_morning': 'Good morning',
+    'greeting_afternoon': 'Good afternoon',
+    'greeting_evening': 'Good evening',
+    'logout': 'Logout',
+    'profile': 'Profile',
   },
   'tr': {
     'appTitle': 'Borsa Paneli',
@@ -115,21 +71,25 @@ const Map<String, Map<String, String>> _l10n = {
     'confidence': 'GÜVEN',
     'retry': 'Tekrar Dene',
     'noData': 'API\'den veri gelmedi.',
+    'greeting_morning': 'Günaydın',
+    'greeting_afternoon': 'İyi öğlenler',
+    'greeting_evening': 'İyi akşamlar',
+    'logout': 'Çıkış Yap',
+    'profile': 'Profil',
   },
 };
 
 // ─────────────────────────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────────────────────────
-String get _baseUrl {
-  if (kIsWeb) return 'http://127.0.0.1:8000';
-  try {
-    if (Platform.isAndroid) return 'http://10.0.2.2:8000';
-  } catch (_) {}
-  return 'http://127.0.0.1:8000';
-}
-
 String _pad(int n) => n.toString().padLeft(2, '0');
+
+String _getGreeting(String lang) {
+  final hour = DateTime.now().hour;
+  if (hour < 12) return _l10n[lang]!['greeting_morning']!;
+  if (hour < 18) return _l10n[lang]!['greeting_afternoon']!;
+  return _l10n[lang]!['greeting_evening']!;
+}
 
 // ─────────────────────────────────────────────────────────────────
 //  MARKET MARQUEE COMPONENT
@@ -142,7 +102,7 @@ class _MarketMarquee extends StatefulWidget {
   State<_MarketMarquee> createState() => _MarketMarqueeState();
 }
 
-class _MarketMarqueeState extends State<_MarketMarquee> with SingleTickerProviderStateMixin {
+class _MarketMarqueeState extends State<_MarketMarquee> {
   late ScrollController _scrollController;
   Timer? _scrollTimer;
 
@@ -158,7 +118,6 @@ class _MarketMarqueeState extends State<_MarketMarquee> with SingleTickerProvide
       if (_scrollController.hasClients) {
         final maxScroll = _scrollController.position.maxScrollExtent;
         final currentScroll = _scrollController.offset;
-        
         if (currentScroll >= maxScroll) {
           _scrollController.jumpTo(0);
         } else {
@@ -178,41 +137,34 @@ class _MarketMarqueeState extends State<_MarketMarquee> with SingleTickerProvide
   @override
   Widget build(BuildContext context) {
     if (widget.items.isEmpty) return const SizedBox.shrink();
-
     return Container(
       height: 40,
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: _DS.textMuted.withValues(alpha: 0.1), width: 1)),
+        border: Border(bottom: BorderSide(color: DS.textMuted.withValues(alpha: 0.1), width: 1)),
       ),
       child: ListView.builder(
         controller: _scrollController,
         scrollDirection: Axis.horizontal,
-        physics: const NeverScrollableScrollPhysics(), // Auto-scroll only
+        physics: const NeverScrollableScrollPhysics(),
         itemBuilder: (context, index) {
-          // Infinite loop effect
           final item = widget.items[index % widget.items.length];
           final symbol = item['symbol'] as String;
           final price = (item['price'] as num).toDouble();
           final change = (item['change_pct'] as num).toDouble();
-          
           final isPositive = change >= 0;
-          final color = isPositive ? _DS.emerald : _DS.crimson;
+          final color = isPositive ? DS.emerald : DS.crimson;
           final icon = isPositive ? Icons.arrow_upward : Icons.arrow_downward;
-
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(symbol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: _DS.textSecondary)),
-                const SizedBox(width: 8),
-                Text(price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _DS.deepBlue)),
-                const SizedBox(width: 4),
-                Icon(icon, size: 12, color: color),
-                Text('${change.abs().toStringAsFixed(2)}%', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: color)),
-              ],
-            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(symbol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: DS.textSecondary)),
+              const SizedBox(width: 8),
+              Text(price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: DS.deepBlue)),
+              const SizedBox(width: 4),
+              Icon(icon, size: 12, color: color),
+              Text('${change.abs().toStringAsFixed(2)}%', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: color)),
+            ]),
           );
         },
       ),
@@ -236,9 +188,40 @@ class BorsaApp extends StatefulWidget {
 
 class _BorsaAppState extends State<BorsaApp> {
   String _lang = 'en';
+  String? _token;
+  Map<String, dynamic>? _currentUser;
 
-  void _toggleLang() =>
-      setState(() => _lang = _lang == 'en' ? 'tr' : 'en');
+  void _toggleLang() => setState(() => _lang = _lang == 'en' ? 'tr' : 'en');
+
+  void _handleLogin(String token, Map<String, dynamic> user) {
+    setState(() {
+      _token = token;
+      _currentUser = user;
+    });
+  }
+
+  void _handleLogout() {
+    setState(() {
+      _token = null;
+      _currentUser = null;
+    });
+  }
+
+  void _handleAvatarSelected(String avatarId) {
+    // Update avatar on server (fire and forget)
+    if (_token != null) {
+      http.put(
+        Uri.parse('${DS.baseUrl}/api/auth/avatar'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'token': _token, 'avatar_id': avatarId}),
+      );
+    }
+    setState(() {
+      if (_currentUser != null) {
+        _currentUser!['avatar_id'] = avatarId;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -247,16 +230,66 @@ class _BorsaAppState extends State<BorsaApp> {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: _DS.bg,
+        scaffoldBackgroundColor: DS.bg,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: _DS.deepBlue,
+          seedColor: DS.indigo,
           brightness: Brightness.light,
-          surface: _DS.surface,
-          onSurface: _DS.textPrimary,
+          surface: DS.surface,
+          onSurface: DS.textPrimary,
         ),
         fontFamily: 'Roboto',
       ),
-      home: HomeScreen(lang: _lang, onToggleLang: _toggleLang),
+      home: _token == null
+        ? LoginScreen(
+            lang: _lang,
+            onToggleLang: _toggleLang,
+            onLoginSuccess: _handleLogin,
+          )
+        : HomeScreen(
+            lang: _lang,
+            onToggleLang: _toggleLang,
+            user: _currentUser!,
+            token: _token!,
+            onLogout: _handleLogout,
+            onAvatarChanged: _handleAvatarSelected,
+          ),
+      onGenerateRoute: (settings) {
+        switch (settings.name) {
+          case '/register':
+            return MaterialPageRoute(
+              builder: (_) => RegisterScreen(lang: _lang),
+            );
+          case '/verify':
+            final email = settings.arguments as String;
+            return MaterialPageRoute(
+              builder: (_) => VerifyScreen(lang: _lang, email: email),
+            );
+          case '/avatar':
+            final email = settings.arguments as String? ?? '';
+            return MaterialPageRoute(
+              builder: (ctx) => AvatarScreen(
+                lang: _lang,
+                email: email,
+                onAvatarSelected: (avatarId) {
+                  // After avatar selection during registration, go to login
+                  Navigator.pushNamedAndRemoveUntil(
+                    ctx, '/login', (route) => false,
+                  );
+                },
+              ),
+            );
+          case '/login':
+            return MaterialPageRoute(
+              builder: (_) => LoginScreen(
+                lang: _lang,
+                onToggleLang: _toggleLang,
+                onLoginSuccess: _handleLogin,
+              ),
+            );
+          default:
+            return null;
+        }
+      },
     );
   }
 }
@@ -267,8 +300,20 @@ class _BorsaAppState extends State<BorsaApp> {
 class HomeScreen extends StatefulWidget {
   final String lang;
   final VoidCallback onToggleLang;
+  final Map<String, dynamic> user;
+  final String token;
+  final VoidCallback onLogout;
+  final Function(String) onAvatarChanged;
 
-  const HomeScreen({super.key, required this.lang, required this.onToggleLang});
+  const HomeScreen({
+    super.key,
+    required this.lang,
+    required this.onToggleLang,
+    required this.user,
+    required this.token,
+    required this.onLogout,
+    required this.onAvatarChanged,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -276,18 +321,18 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _tickerCtrl = TextEditingController();
-  
+
   bool _loading = false;
   String _selectedRange = '1M';
   String? _error;
   Map<String, dynamic>? _data;
   List<dynamic>? _dataList;
-  Map<String, dynamic>? _forecast; 
-  List<Map<String, dynamic>>? _recentNews; 
+  Map<String, dynamic>? _forecast;
+  List<Map<String, dynamic>>? _recentNews;
   List<dynamic> _marketSummary = [];
 
-  Timer? _refreshTimer; 
-  DateTime? _lastFetchTime; 
+  Timer? _refreshTimer;
+  DateTime? _lastFetchTime;
 
   String t(String key) => _l10n[widget.lang]![key] ?? key;
 
@@ -299,19 +344,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchMarketSummary() async {
     try {
-      final uri = Uri.parse('$_baseUrl/api/market_summary');
+      final uri = Uri.parse('${DS.baseUrl}/api/market_summary');
       final response = await http.get(uri).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
-         final body = jsonDecode(response.body);
-         if (mounted) {
-           setState(() {
-             _marketSummary = body['data'] as List<dynamic>;
-           });
-         }
+        final body = jsonDecode(response.body);
+        if (mounted) {
+          setState(() => _marketSummary = body['data'] as List<dynamic>);
+        }
       }
-    } catch (_) {
-      // Fail silently for the marquee so it doesn't break the main UI
-    }
+    } catch (_) {}
   }
 
   @override
@@ -328,18 +369,15 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!isAutoRefresh) {
       _refreshTimer?.cancel();
       setState(() {
-        _loading = true;
-        _error = null;
-        _data = null;
-        _dataList = null;
-        _forecast = null;
-        _recentNews = null;
+        _loading = true; _error = null;
+        _data = null; _dataList = null;
+        _forecast = null; _recentNews = null;
         _lastFetchTime = null;
       });
     }
 
     try {
-      final uri = Uri.parse('$_baseUrl/api/analyze/$ticker?range=$_selectedRange');
+      final uri = Uri.parse('${DS.baseUrl}/api/analyze/$ticker?range=$_selectedRange');
       final response = await http.get(uri).timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
@@ -353,10 +391,10 @@ class _HomeScreenState extends State<HomeScreen> {
             _data = dataList.last as Map<String, dynamic>;
             _dataList = dataList;
             _forecast = body['forecast'] as Map<String, dynamic>?;
-            _recentNews = (body['recent_news'] as List<dynamic>?)?.map((e) => e as Map<String, dynamic>).toList();
+            _recentNews = (body['recent_news'] as List<dynamic>?)
+                ?.map((e) => e as Map<String, dynamic>).toList();
             _lastFetchTime = DateTime.now();
           });
-
           if (!isAutoRefresh) {
             _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
               _analyze(isAutoRefresh: true);
@@ -374,19 +412,74 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showProfileDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final avatarId = widget.user['avatar_id'] as String? ?? 'business_man';
+        final username = widget.user['username'] as String? ?? 'User';
+        final email = widget.user['email'] as String? ?? '';
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: DS.getAvatarBg(avatarId),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(DS.getAvatarIcon(avatarId),
+                    color: DS.getAvatarColor(avatarId), size: 40),
+                ),
+                const SizedBox(height: 16),
+                Text(username,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: DS.deepBlue)),
+                const SizedBox(height: 4),
+                Text(email,
+                  style: const TextStyle(fontSize: 13, color: DS.textSecondary)),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity, height: 44,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      widget.onLogout();
+                    },
+                    icon: const Icon(Icons.logout_rounded, size: 18),
+                    label: Text(t('logout')),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: DS.crimson,
+                      side: const BorderSide(color: DS.crimson),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final avatarId = widget.user['avatar_id'] as String? ?? 'business_man';
+    final username = widget.user['username'] as String? ?? 'User';
+
     return Scaffold(
-      backgroundColor: _DS.bg,
+      backgroundColor: DS.bg,
       body: SafeArea(
         child: Column(
           children: [
-            _PremiumAppBar(
-              lang: widget.lang,
-              onToggleLang: widget.onToggleLang,
-              lastFetchTime: _lastFetchTime,
-            ),
-            if (_marketSummary.isNotEmpty) 
+            // ── App Bar with Profile ──
+            _buildAppBar(avatarId, username),
+            if (_marketSummary.isNotEmpty)
               _MarketMarquee(items: _marketSummary),
             Expanded(
               child: Center(
@@ -397,6 +490,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // Welcome greeting
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 24),
+                          child: Text(
+                            '${_getGreeting(widget.lang)}, $username 👋',
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              color: DS.deepBlue,
+                            ),
+                          ),
+                        ),
+
                         _SearchBar(
                           controller: _tickerCtrl,
                           hint: t('searchHint'),
@@ -407,67 +513,55 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 32),
 
                         if (_loading)
-                          Center(
-                            child: Column(
-                              children: [
-                                const CircularProgressIndicator(color: _DS.deepBlue),
-                                const SizedBox(height: 16),
-                                Text(t('loading'), style: const TextStyle(color: _DS.textSecondary, fontWeight: FontWeight.w600)),
-                              ],
-                            ),
-                          ),
+                          Center(child: Column(children: [
+                            const CircularProgressIndicator(color: DS.indigo),
+                            const SizedBox(height: 16),
+                            Text(t('loading'), style: const TextStyle(color: DS.textSecondary, fontWeight: FontWeight.w600)),
+                          ])),
 
                         if (_error != null)
                           _ErrorCard(message: _error!, onRetry: _analyze, lang: widget.lang),
 
                         if (_data != null) ...[
                           if (_forecast != null) ...[
-                             AnimatedSwitcher(
-                               duration: const Duration(milliseconds: 500),
-                               child: _ForecastCard(
-                                 key: ValueKey('forecast_${_lastFetchTime?.millisecondsSinceEpoch}'),
-                                 forecast: _forecast!,
-                                 lang: widget.lang,
-                               ),
-                             ),
-                             const SizedBox(height: 16),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 500),
+                              child: _ForecastCard(
+                                key: ValueKey('forecast_${_lastFetchTime?.millisecondsSinceEpoch}'),
+                                forecast: _forecast!, lang: widget.lang,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
                           ],
-                          
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 500),
                             child: _SentimentCard(
                               key: ValueKey('sentiment_${_lastFetchTime?.millisecondsSinceEpoch}'),
-                              data: _data!,
-                              lang: widget.lang,
+                              data: _data!, lang: widget.lang,
                             ),
                           ),
                           const SizedBox(height: 16),
-                          
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 600),
                             child: _ProChartSection(
-                               key: ValueKey('chart_${_selectedRange}_${_lastFetchTime?.millisecondsSinceEpoch}'),
-                               dataList: _dataList!,
-                               forecast: _forecast,
-                               lang: widget.lang,
-                               selectedRange: _selectedRange,
-                               onRangeChanged: (val) {
-                                 setState(() => _selectedRange = val);
-                                 _analyze();
-                               },
+                              key: ValueKey('chart_${_selectedRange}_${_lastFetchTime?.millisecondsSinceEpoch}'),
+                              dataList: _dataList!, forecast: _forecast,
+                              lang: widget.lang, selectedRange: _selectedRange,
+                              onRangeChanged: (val) {
+                                setState(() => _selectedRange = val);
+                                _analyze();
+                              },
                             ),
                           ),
-
                           if (_recentNews != null) ...[
-                             const SizedBox(height: 32),
-                             AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 700),
-                                child: _RecentNewsSection(
-                                  key: ValueKey('news_${_lastFetchTime?.millisecondsSinceEpoch}'),
-                                  news: _recentNews!,
-                                  lang: widget.lang,
-                                ),
-                             ),
+                            const SizedBox(height: 32),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 700),
+                              child: _RecentNewsSection(
+                                key: ValueKey('news_${_lastFetchTime?.millisecondsSinceEpoch}'),
+                                news: _recentNews!, lang: widget.lang,
+                              ),
+                            ),
                           ],
                           const SizedBox(height: 40),
                         ],
@@ -479,6 +573,86 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAppBar(String avatarId, String username) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFFFFFFFF), Color(0xFFF1F5F9)],
+          begin: Alignment.topCenter, end: Alignment.bottomCenter,
+        ),
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.show_chart_rounded, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _l10n[widget.lang]!['appTitle']!.toUpperCase(),
+            style: const TextStyle(
+              color: DS.deepBlue, fontSize: 16,
+              fontWeight: FontWeight.w800, letterSpacing: 1.2,
+            ),
+          ),
+          const Spacer(),
+          if (_lastFetchTime != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.sync, color: DS.textMuted, size: 14),
+                const SizedBox(width: 4),
+                Text(
+                  '${_pad(_lastFetchTime!.hour)}:${_pad(_lastFetchTime!.minute)}:${_pad(_lastFetchTime!.second)}',
+                  style: const TextStyle(color: DS.textSecondary, fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+              ]),
+            ),
+          GestureDetector(
+            onTap: widget.onToggleLang,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: DS.neumorphicShadow,
+              ),
+              child: Text(
+                widget.lang == 'en' ? 'TR' : 'EN',
+                style: const TextStyle(color: DS.deepBlue, fontSize: 11, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          // Profile avatar
+          GestureDetector(
+            onTap: _showProfileDialog,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: DS.getAvatarBg(avatarId),
+                shape: BoxShape.circle,
+                border: Border.all(color: DS.getAvatarColor(avatarId).withValues(alpha: 0.3), width: 2),
+                boxShadow: DS.neumorphicShadow,
+              ),
+              child: Icon(DS.getAvatarIcon(avatarId),
+                color: DS.getAvatarColor(avatarId), size: 20),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -498,8 +672,8 @@ class _PremiumCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: customGradient ?? _DS.cardGrad,
-        boxShadow: _DS.neumorphicShadow,
+        gradient: customGradient ?? DS.cardGrad,
+        boxShadow: DS.neumorphicShadow,
         border: Border.all(color: Colors.white, width: 2),
       ),
       child: ClipRRect(
@@ -511,95 +685,7 @@ class _PremiumCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  PREMIUM APP BAR
-// ─────────────────────────────────────────────────────────────────
-class _PremiumAppBar extends StatelessWidget {
-  final String lang;
-  final VoidCallback onToggleLang;
-  final DateTime? lastFetchTime;
-
-  const _PremiumAppBar({required this.lang, required this.onToggleLang, this.lastFetchTime});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFFFFFFF), Color(0xFFF1F5F9)],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: _DS.deepBlue,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.show_chart_rounded, color: Colors.white, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            _l10n[lang]!['appTitle']!.toUpperCase(),
-            style: const TextStyle(
-              color: _DS.deepBlue,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const Spacer(),
-          if (lastFetchTime != null)
-            Padding(
-               padding: const EdgeInsets.only(right: 14),
-               child: Row(
-                 mainAxisSize: MainAxisSize.min,
-                 children: [
-                    const Icon(Icons.sync, color: _DS.textMuted, size: 14),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${_pad(lastFetchTime!.hour)}:${_pad(lastFetchTime!.minute)}:${_pad(lastFetchTime!.second)}',
-                      style: const TextStyle(
-                        color: _DS.textSecondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                 ],
-               ),
-            ),
-          GestureDetector(
-            onTap: onToggleLang,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-                boxShadow: _DS.neumorphicShadow,
-              ),
-              child: Text(
-                lang == 'en' ? 'TR' : 'EN',
-                style: const TextStyle(
-                  color: _DS.deepBlue,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────
-//  SEARCH BAR 
+//  SEARCH BAR
 // ─────────────────────────────────────────────────────────────────
 class _SearchBar extends StatelessWidget {
   final TextEditingController controller;
@@ -609,59 +695,51 @@ class _SearchBar extends StatelessWidget {
   final bool loading;
 
   const _SearchBar({
-    required this.controller,
-    required this.hint,
-    required this.buttonLabel,
-    required this.onSearch,
-    required this.loading,
+    required this.controller, required this.hint,
+    required this.buttonLabel, required this.onSearch, required this.loading,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              boxShadow: _DS.neumorphicShadow,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: TextField(
-              controller: controller,
-              textCapitalization: TextCapitalization.characters,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => onSearch(),
-              style: const TextStyle(fontWeight: FontWeight.w600, color: _DS.textPrimary),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: const TextStyle(color: _DS.textMuted, fontWeight: FontWeight.normal),
-                prefixIcon: const Icon(Icons.search, color: _DS.textMuted),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+    return Row(children: [
+      Expanded(
+        child: Container(
+          decoration: BoxDecoration(
+            boxShadow: DS.neumorphicShadow,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: TextField(
+            controller: controller,
+            textCapitalization: TextCapitalization.characters,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => onSearch(),
+            style: const TextStyle(fontWeight: FontWeight.w600, color: DS.textPrimary),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: const TextStyle(color: DS.textMuted, fontWeight: FontWeight.normal),
+              prefixIcon: const Icon(Icons.search, color: DS.textMuted),
+              filled: true, fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
             ),
           ),
         ),
-        const SizedBox(width: 12),
-        ElevatedButton(
-          onPressed: loading ? null : onSearch,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _DS.deepBlue,
-            foregroundColor: Colors.white,
-            elevation: 8,
-            shadowColor: _DS.deepBlue.withValues(alpha: 0.3),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-          ),
-          child: Text(buttonLabel, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+      ),
+      const SizedBox(width: 12),
+      ElevatedButton(
+        onPressed: loading ? null : onSearch,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: DS.indigo,
+          foregroundColor: Colors.white,
+          elevation: 8,
+          shadowColor: DS.indigo.withValues(alpha: 0.3),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
         ),
-      ],
-    );
+        child: Text(buttonLabel, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+      ),
+    ]);
   }
 }
 
@@ -678,28 +756,25 @@ class _ErrorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _PremiumCard(
-      customGradient: _DS.bearishGrad,
+      customGradient: DS.bearishGrad,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(children: [
           Container(
-             padding: const EdgeInsets.all(10),
-             decoration: BoxDecoration(
-               color: _DS.crimsonSoft,
-               shape: BoxShape.circle,
-             ),
-             child: const Icon(Icons.error_outline, color: _DS.crimson, size: 28),
+            padding: const EdgeInsets.all(10),
+            decoration: const BoxDecoration(color: DS.crimsonSoft, shape: BoxShape.circle),
+            child: const Icon(Icons.error_outline, color: DS.crimson, size: 28),
           ),
           const SizedBox(height: 12),
-          Text(message, textAlign: TextAlign.center, style: const TextStyle(color: _DS.crimson, fontWeight: FontWeight.w600)),
+          Text(message, textAlign: TextAlign.center, style: const TextStyle(color: DS.crimson, fontWeight: FontWeight.w600)),
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh, size: 18),
             label: Text(_l10n[lang]!['retry']!),
             style: OutlinedButton.styleFrom(
-              foregroundColor: _DS.crimson,
-              side: const BorderSide(color: _DS.crimson),
+              foregroundColor: DS.crimson,
+              side: const BorderSide(color: DS.crimson),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
@@ -710,7 +785,7 @@ class _ErrorCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  FORECAST CARD (MINIMALIST)
+//  FORECAST CARD
 // ─────────────────────────────────────────────────────────────────
 class _ForecastCard extends StatelessWidget {
   final Map<String, dynamic> forecast;
@@ -724,10 +799,9 @@ class _ForecastCard extends StatelessWidget {
     final score = (forecast['prediction_score'] as num?)?.toDouble() ?? 0.0;
     final isBullish = label.toLowerCase().contains("up") || label.toLowerCase().contains("bull");
 
-    final Gradient gradient = isBullish ? _DS.bullishGrad : _DS.bearishGrad;
-    final Color accentColor = isBullish ? _DS.emerald : _DS.crimson;
-    final IconData trendIcon = isBullish ? Icons.trending_up : Icons.trending_down;
-
+    final gradient = isBullish ? DS.bullishGrad : DS.bearishGrad;
+    final accentColor = isBullish ? DS.emerald : DS.crimson;
+    final trendIcon = isBullish ? Icons.trending_up : Icons.trending_down;
     final confidencePct = score * 100;
 
     return _PremiumCard(
@@ -737,50 +811,26 @@ class _ForecastCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(trendIcon, color: accentColor, size: 36),
-                const SizedBox(width: 8),
-                Text(
-                  label.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                    color: accentColor,
-                    letterSpacing: 1.5,
-                  ),
-                ),
-              ],
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(trendIcon, color: accentColor, size: 36),
+              const SizedBox(width: 8),
+              Text(label.toUpperCase(),
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900,
+                  color: accentColor, letterSpacing: 1.5)),
+            ]),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  '${_l10n[lang]!['confidence']}: ',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _DS.textSecondary, 
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1,
-                  ),
-                ),
-                TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0, end: confidencePct),
-                  duration: const Duration(milliseconds: 1200),
-                  curve: Curves.easeOutCubic,
-                  builder: (_, val, __) => Text(
-                    '${val.toStringAsFixed(1)}%',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: accentColor,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text('${_l10n[lang]!['confidence']}: ',
+                style: const TextStyle(fontSize: 13, color: DS.textSecondary,
+                  fontWeight: FontWeight.w700, letterSpacing: 1)),
+              TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0, end: confidencePct),
+                duration: const Duration(milliseconds: 1200),
+                curve: Curves.easeOutCubic,
+                builder: (_, val, __) => Text('${val.toStringAsFixed(1)}%',
+                  style: TextStyle(fontSize: 16, color: accentColor, fontWeight: FontWeight.w800)),
+              ),
+            ]),
           ],
         ),
       ),
@@ -796,7 +846,6 @@ class _SentimentCard extends StatelessWidget {
   final String lang;
 
   const _SentimentCard({super.key, required this.data, required this.lang});
-
   String t(String key) => _l10n[lang]![key] ?? key;
 
   @override
@@ -808,89 +857,55 @@ class _SentimentCard extends StatelessWidget {
     final isPositive = score > 0.05;
     final isNegative = score < -0.05;
 
-    final Gradient gradient = isPositive ? _DS.bullishGrad : (isNegative ? _DS.bearishGrad : _DS.neutralGrad);
-    final Color accentColor = isPositive ? _DS.emerald : (isNegative ? _DS.crimson : _DS.neutral);
-
-    final String trendLabel = isPositive ? t('uptrend') : (isNegative ? t('downtrend') : t('neutral'));
-    final IconData trendIcon = isPositive ? Icons.trending_up : (isNegative ? Icons.trending_down : Icons.trending_flat);
+    final gradient = isPositive ? DS.bullishGrad : (isNegative ? DS.bearishGrad : DS.neutralGrad);
+    final accentColor = isPositive ? DS.emerald : (isNegative ? DS.crimson : DS.neutral);
+    final trendLabel = isPositive ? t('uptrend') : (isNegative ? t('downtrend') : t('neutral'));
+    final trendIcon = isPositive ? Icons.trending_up : (isNegative ? Icons.trending_down : Icons.trending_flat);
 
     return _PremiumCard(
       customGradient: gradient,
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Text(t('sentimentTitle').toUpperCase(),
-                  style: const TextStyle(
-                      color: _DS.textMuted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.5)),
-            ]),
-            const SizedBox(height: 16),
-            Row(children: [
-              Icon(trendIcon, color: accentColor, size: 28),
-              const SizedBox(width: 8),
-              Text(trendLabel,
-                  style: TextStyle(
-                      color: accentColor,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800)),
-            ]),
-            const SizedBox(height: 24),
-            Row(
-               crossAxisAlignment: CrossAxisAlignment.end,
-               children: [
-                  Expanded(
-                    child: Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Text(t('score'), style: const TextStyle(color: _DS.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
-                         const SizedBox(height: 4),
-                         TweenAnimationBuilder<double>(
-                            tween: Tween<double>(begin: 0, end: score),
-                            duration: const Duration(milliseconds: 1200),
-                            curve: Curves.easeOutCubic,
-                            builder: (_, val, __) => Text(
-                              val.toStringAsFixed(3),
-                              style: TextStyle(
-                                color: accentColor,
-                                fontSize: 36,
-                                fontWeight: FontWeight.w900,
-                                height: 1,
-                              ),
-                            ),
-                          ),
-                       ],
-                    ),
-                  ),
-               ],
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(t('sentimentTitle').toUpperCase(),
+            style: const TextStyle(color: DS.textMuted, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
+          const SizedBox(height: 16),
+          Row(children: [
+            Icon(trendIcon, color: accentColor, size: 28),
+            const SizedBox(width: 8),
+            Text(trendLabel, style: TextStyle(color: accentColor, fontSize: 22, fontWeight: FontWeight.w800)),
+          ]),
+          const SizedBox(height: 24),
+          Text(t('score'), style: const TextStyle(color: DS.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: score),
+            duration: const Duration(milliseconds: 1200),
+            curve: Curves.easeOutCubic,
+            builder: (_, val, __) => Text(val.toStringAsFixed(3),
+              style: TextStyle(color: accentColor, fontSize: 36, fontWeight: FontWeight.w900, height: 1)),
+          ),
+          const SizedBox(height: 20),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0, end: ((score + 1) / 2).clamp(0.0, 1.0)),
+            duration: const Duration(milliseconds: 1400),
+            curve: Curves.easeOutCubic,
+            builder: (_, val, __) => ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: val, minHeight: 8,
+                backgroundColor: accentColor.withValues(alpha: 0.15),
+                valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+              ),
             ),
-            const SizedBox(height: 20),
-            TweenAnimationBuilder<double>(
-               tween: Tween<double>(begin: 0, end: ((score + 1) / 2).clamp(0.0, 1.0)),
-               duration: const Duration(milliseconds: 1400),
-               curve: Curves.easeOutCubic,
-               builder: (_, val, __) => ClipRRect(
-                 borderRadius: BorderRadius.circular(6),
-                 child: LinearProgressIndicator(
-                   value: val,
-                   minHeight: 8,
-                   backgroundColor: accentColor.withValues(alpha: 0.15),
-                   valueColor: AlwaysStoppedAnimation<Color>(accentColor),
-                 ),
-               ),
-            ),
-            const SizedBox(height: 24),
-            Row(children: [
-              _ScorePill(label: t('positive'), value: positive, color: _DS.emerald),
-              const SizedBox(width: 12),
-              _ScorePill(label: t('negative'), value: negative, color: _DS.crimson),
-            ]),
-          ],
-        ),
+          ),
+          const SizedBox(height: 24),
+          Row(children: [
+            _ScorePill(label: t('positive'), value: positive, color: DS.emerald),
+            const SizedBox(width: 12),
+            _ScorePill(label: t('negative'), value: negative, color: DS.crimson),
+          ]),
+        ]),
       ),
     );
   }
@@ -908,20 +923,16 @@ class _ScorePill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-      ),
+        color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.circle, size: 8, color: color),
         const SizedBox(width: 6),
         TweenAnimationBuilder<double>(
-           tween: Tween<double>(begin: 0, end: value * 100),
-           duration: const Duration(milliseconds: 1200),
-           curve: Curves.easeOutCubic,
-           builder: (_, val, __) => Text(
-             '$label  ${val.toStringAsFixed(1)}%',
-             style: TextStyle(color: _DS.deepBlue, fontSize: 13, fontWeight: FontWeight.w700),
-           ),
+          tween: Tween<double>(begin: 0, end: value * 100),
+          duration: const Duration(milliseconds: 1200),
+          curve: Curves.easeOutCubic,
+          builder: (_, val, __) => Text('$label  ${val.toStringAsFixed(1)}%',
+            style: const TextStyle(color: DS.deepBlue, fontSize: 13, fontWeight: FontWeight.w700)),
         ),
       ]),
     );
@@ -929,7 +940,7 @@ class _ScorePill extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  PRO CHART SECTION (fl_chart)
+//  PRO CHART SECTION
 // ─────────────────────────────────────────────────────────────────
 class _ProChartSection extends StatelessWidget {
   final List<dynamic> dataList;
@@ -939,12 +950,8 @@ class _ProChartSection extends StatelessWidget {
   final ValueChanged<String> onRangeChanged;
 
   const _ProChartSection({
-    super.key,
-    required this.dataList,
-    this.forecast,
-    required this.lang,
-    required this.selectedRange,
-    required this.onRangeChanged,
+    super.key, required this.dataList, this.forecast,
+    required this.lang, required this.selectedRange, required this.onRangeChanged,
   });
 
   String t(String key) => _l10n[lang]![key] ?? key;
@@ -953,76 +960,59 @@ class _ProChartSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (dataList.isEmpty) return const SizedBox.shrink();
 
-    // 1. Prepare Historical Points
     final List<FlSpot> spots = [];
     double minY = double.infinity;
     double maxY = double.negativeInfinity;
 
     for (int i = 0; i < dataList.length; i++) {
-        final point = dataList[i];
-        final close = (point['Close'] as num?)?.toDouble() ?? 0.0;
-        
-        if (close > 0) {
-           spots.add(FlSpot(i.toDouble(), close));
-           if (close < minY) minY = close;
-           if (close > maxY) maxY = close;
-        }
+      final point = dataList[i];
+      final close = (point['Close'] as num?)?.toDouble() ?? 0.0;
+      if (close > 0) {
+        spots.add(FlSpot(i.toDouble(), close));
+        if (close < minY) minY = close;
+        if (close > maxY) maxY = close;
+      }
     }
 
-    // 2. Prepare Prediction Point
     FlSpot? predSpot;
-    Color predColor = _DS.neutral;
-    
+    Color predColor = DS.neutral;
+
     if (forecast != null && forecast!['target_price'] != null && spots.isNotEmpty) {
-       final targetPrice = (forecast!['target_price'] as num).toDouble();
-       final lastX = spots.last.x;
-       predSpot = FlSpot(lastX + 1, targetPrice);
-       
-       if (targetPrice < minY) minY = targetPrice;
-       if (targetPrice > maxY) maxY = targetPrice;
-       
-       final label = forecast!['forecast_label'] as String? ?? '';
-       final isBullish = label.toLowerCase().contains("up") || label.toLowerCase().contains("bull");
-       predColor = isBullish ? _DS.emerald : _DS.crimson;
+      final targetPrice = (forecast!['target_price'] as num).toDouble();
+      final lastX = spots.last.x;
+      predSpot = FlSpot(lastX + 1, targetPrice);
+      if (targetPrice < minY) minY = targetPrice;
+      if (targetPrice > maxY) maxY = targetPrice;
+
+      final label = forecast!['forecast_label'] as String? ?? '';
+      final isBullish = label.toLowerCase().contains("up") || label.toLowerCase().contains("bull");
+      predColor = isBullish ? DS.emerald : DS.crimson;
     }
 
-    // Add padding to Y axis so the chart doesn't touch the edges completely
     final yPadding = (maxY - minY) * 0.1;
-    if (yPadding == 0) {
-      minY -= 1;
-      maxY += 1;
-    } else {
-      minY -= yPadding;
-      maxY += yPadding;
-    }
+    if (yPadding == 0) { minY -= 1; maxY += 1; }
+    else { minY -= yPadding; maxY += yPadding; }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 12),
-          child: Row(
-            children: [
-              Text(t('technical').toUpperCase(),
-                  style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: _DS.textMuted,
-                      letterSpacing: 1.5)),
-              const Spacer(),
-              if (forecast != null)
-                 Row(
-                   children: [
-                     Container(width: 8, height: 2, color: predColor),
-                     const SizedBox(width: 4),
-                     Text('AI TARGET', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: predColor)),
-                   ],
-                 ),
-            ],
-          ),
+          child: Row(children: [
+            Text(t('technical').toUpperCase(),
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
+                color: DS.textMuted, letterSpacing: 1.5)),
+            const Spacer(),
+            if (forecast != null)
+              Row(children: [
+                Container(width: 8, height: 2, color: predColor),
+                const SizedBox(width: 4),
+                Text('AI TARGET', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: predColor)),
+              ]),
+          ]),
         ),
-        
-        // Time Range Toggles
+
+        // Time range toggles
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Row(
@@ -1038,17 +1028,14 @@ class _ProChartSection extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       decoration: BoxDecoration(
-                        color: isActive ? _DS.deepBlue.withValues(alpha: 0.08) : Colors.transparent,
+                        color: isActive ? DS.indigo.withValues(alpha: 0.08) : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
-                        r,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                          color: isActive ? _DS.deepBlue : _DS.textMuted,
-                        ),
-                      ),
+                      child: Text(r, style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                        color: isActive ? DS.indigo : DS.textMuted,
+                      )),
                     ),
                   ),
                 ),
@@ -1056,7 +1043,7 @@ class _ProChartSection extends StatelessWidget {
             }).toList(),
           ),
         ),
-        
+
         _PremiumCard(
           child: Container(
             height: 280,
@@ -1065,19 +1052,12 @@ class _ProChartSection extends StatelessWidget {
               LineChartData(
                 minX: 0,
                 maxX: predSpot != null ? spots.last.x + 1 : spots.last.x,
-                minY: minY,
-                maxY: maxY,
+                minY: minY, maxY: maxY,
                 gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
+                  show: true, drawVerticalLine: false,
                   horizontalInterval: (maxY - minY) / 4,
-                  getDrawingHorizontalLine: (value) {
-                    return FlLine(
-                      color: _DS.textMuted.withValues(alpha: 0.15),
-                      strokeWidth: 1,
-                      dashArray: [5, 5],
-                    );
-                  },
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: DS.textMuted.withValues(alpha: 0.15), strokeWidth: 1, dashArray: [5, 5]),
                 ),
                 titlesData: FlTitlesData(
                   show: true,
@@ -1086,82 +1066,52 @@ class _ProChartSection extends StatelessWidget {
                   bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 42,
-                      getTitlesWidget: (value, meta) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8.0),
-                          child: Text(
-                            '\$${value.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              color: _DS.textMuted,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 11,
-                            ),
-                          ),
-                        );
-                      },
+                      showTitles: true, reservedSize: 42,
+                      getTitlesWidget: (value, meta) => Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: Text('\$${value.toStringAsFixed(0)}',
+                          style: const TextStyle(color: DS.textMuted, fontWeight: FontWeight.w600, fontSize: 11)),
+                      ),
                     ),
                   ),
                 ),
                 borderData: FlBorderData(show: false),
                 lineBarsData: [
-                  // Historical Line
                   LineChartBarData(
-                    spots: spots,
-                    isCurved: true,
-                    curveSmoothness: 0.2,
-                    color: _DS.deepBlue,
-                    barWidth: 3,
-                    isStrokeCapRound: true,
+                    spots: spots, isCurved: true, curveSmoothness: 0.2,
+                    color: DS.deepBlue, barWidth: 3, isStrokeCapRound: true,
                     dotData: const FlDotData(show: false),
                     belowBarData: BarAreaData(
                       show: true,
                       gradient: LinearGradient(
-                        colors: [
-                          _DS.deepBlue.withValues(alpha: 0.15),
-                          _DS.deepBlue.withValues(alpha: 0.0),
-                        ],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
+                        colors: [DS.deepBlue.withValues(alpha: 0.15), DS.deepBlue.withValues(alpha: 0.0)],
+                        begin: Alignment.topCenter, end: Alignment.bottomCenter,
                       ),
                     ),
                   ),
-                  // Prediction Line (Connecting last historical point to target)
                   if (predSpot != null && spots.isNotEmpty)
                     LineChartBarData(
-                       spots: [spots.last, predSpot],
-                       isCurved: false,
-                       color: predColor,
-                       barWidth: 3,
-                       isStrokeCapRound: true,
-                       dashArray: [5, 5],
-                       dotData: FlDotData(
-                          show: true,
-                          getDotPainter: (spot, percent, barData, index) {
-                             if (index == 1) { // Only show dot on the final target prediction
-                               return FlDotCirclePainter(
-                                 radius: 5,
-                                 color: Colors.white,
-                                 strokeWidth: 3,
-                                 strokeColor: predColor,
-                               );
-                             }
-                             return FlDotCirclePainter(radius: 0, color: Colors.transparent);
-                          },
-                       ),
+                      spots: [spots.last, predSpot],
+                      isCurved: false, color: predColor, barWidth: 3,
+                      isStrokeCapRound: true, dashArray: [5, 5],
+                      dotData: FlDotData(
+                        show: true,
+                        getDotPainter: (spot, percent, barData, index) {
+                          if (index == 1) {
+                            return FlDotCirclePainter(
+                              radius: 5, color: Colors.white,
+                              strokeWidth: 3, strokeColor: predColor);
+                          }
+                          return FlDotCirclePainter(radius: 0, color: Colors.transparent);
+                        },
+                      ),
                     ),
                 ],
                 lineTouchData: LineTouchData(
                   touchTooltipData: LineTouchTooltipData(
-                    getTooltipItems: (touchedSpots) {
-                      return touchedSpots.map((spot) {
-                        return LineTooltipItem(
-                           '\$${spot.y.toStringAsFixed(2)}',
-                           const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                        );
-                      }).toList();
-                    },
+                    getTooltipItems: (touchedSpots) => touchedSpots.map((spot) =>
+                      LineTooltipItem('\$${spot.y.toStringAsFixed(2)}',
+                        const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))).toList(),
                   ),
                 ),
               ),
@@ -1191,93 +1141,64 @@ class _RecentNewsSection extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 16),
-          child: Text(
-            _l10n[lang]!['recentNews']!.toUpperCase(),
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              color: _DS.textMuted,
-              letterSpacing: 1.5,
-            ),
-          ),
+          child: Text(_l10n[lang]!['recentNews']!.toUpperCase(),
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
+              color: DS.textMuted, letterSpacing: 1.5)),
         ),
         if (news.isEmpty)
-           _PremiumCard(
-             child: Padding(
-               padding: const EdgeInsets.all(24),
-               child: Center(
-                 child: Text(_l10n[lang]!['noNews']!, style: const TextStyle(color: _DS.textMuted)),
-               ),
-             ),
-           )
+          _PremiumCard(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(child: Text(_l10n[lang]!['noNews']!, style: const TextStyle(color: DS.textMuted))),
+            ),
+          )
         else
-           ...news.map((item) {
-             final title = item['title'] as String? ?? '';
-             final publisher = item['publisher'] as String? ?? '';
-             final link = item['link'] as String? ?? '';
+          ...news.map((item) {
+            final title = item['title'] as String? ?? '';
+            final publisher = item['publisher'] as String? ?? '';
+            final link = item['link'] as String? ?? '';
 
-             return Padding(
-               padding: const EdgeInsets.only(bottom: 12),
-               child: _PremiumCard(
-                 child: Material(
-                   color: Colors.transparent,
-                   child: InkWell(
-                     onTap: link.isNotEmpty ? () => launchUrl(Uri.parse(link)) : null,
-                     child: Padding(
-                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                       child: Row(
-                         crossAxisAlignment: CrossAxisAlignment.start,
-                         children: [
-                           Container(
-                             padding: const EdgeInsets.all(10),
-                             decoration: BoxDecoration(
-                               color: _DS.surfaceAlt,
-                               borderRadius: BorderRadius.circular(12),
-                               border: Border.all(color: Colors.white, width: 1.5),
-                               boxShadow: [
-                                 BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))
-                               ],
-                             ),
-                             child: const Icon(Icons.article_rounded, color: _DS.deepBlue, size: 20),
-                           ),
-                           const SizedBox(width: 16),
-                           Expanded(
-                             child: Column(
-                               crossAxisAlignment: CrossAxisAlignment.start,
-                               children: [
-                                 Text(
-                                   title,
-                                   style: const TextStyle(
-                                     color: _DS.textPrimary,
-                                     fontSize: 14,
-                                     fontWeight: FontWeight.w600,
-                                     height: 1.4,
-                                   ),
-                                 ),
-                                 if (publisher.isNotEmpty)
-                                   Padding(
-                                     padding: const EdgeInsets.only(top: 6),
-                                     child: Text(
-                                       publisher.toUpperCase(),
-                                       style: TextStyle(
-                                         color: _DS.textMuted,
-                                         fontSize: 10,
-                                         fontWeight: FontWeight.w800,
-                                         letterSpacing: 1.0,
-                                       ),
-                                     ),
-                                   ),
-                               ],
-                             ),
-                           ),
-                         ],
-                       ),
-                     ),
-                   ),
-                 ),
-               ),
-             );
-           }).toList(),
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _PremiumCard(
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: link.isNotEmpty ? () => launchUrl(Uri.parse(link)) : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: DS.surfaceAlt, borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white, width: 1.5),
+                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))],
+                          ),
+                          child: const Icon(Icons.article_rounded, color: DS.deepBlue, size: 20),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(title,
+                              style: const TextStyle(color: DS.textPrimary, fontSize: 14,
+                                fontWeight: FontWeight.w600, height: 1.4)),
+                            if (publisher.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(publisher.toUpperCase(),
+                                  style: const TextStyle(color: DS.textMuted, fontSize: 10,
+                                    fontWeight: FontWeight.w800, letterSpacing: 1.0)),
+                              ),
+                          ]),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
       ],
     );
   }

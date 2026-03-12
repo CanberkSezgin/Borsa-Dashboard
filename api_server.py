@@ -24,6 +24,11 @@ from sentiment_analysis import (
     merge_sentiment_into_ohlcv,
 )
 from lstm_forecast import generate_forecast
+from user_db import (
+    create_user, verify_code, authenticate,
+    get_user_from_token, update_avatar,
+    generate_verification_code
+)
 
 
 # ─────────────────────────────────────────────
@@ -207,6 +212,118 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+
+
+# ─────────────────────────────────────────────
+#  AUTH ENDPOINTS
+# ─────────────────────────────────────────────
+
+@app.post("/api/auth/register")
+async def register(body: dict = None):
+    """Register a new user account."""
+    from fastapi import Request
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    
+    username = body.get("username", "").strip()
+    email = body.get("email", "").strip()
+    password = body.get("password", "")
+    
+    if not username or not email or not password:
+        raise HTTPException(status_code=400, detail="Username, email, and password are required.")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address.")
+    
+    result = create_user(username, email, password)
+    if "error" in result:
+        raise HTTPException(status_code=409, detail=result["error"])
+    
+    return {"status": "success", "message": "Verification code sent.", "data": result}
+
+
+@app.post("/api/auth/verify")
+async def verify_email(body: dict = None):
+    """Verify email with 6-digit code."""
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    
+    email = body.get("email", "").strip()
+    code = body.get("code", "").strip()
+    
+    if not email or not code:
+        raise HTTPException(status_code=400, detail="Email and code are required.")
+    
+    if verify_code(email, code):
+        return {"status": "success", "message": "Email verified successfully."}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
+
+
+@app.post("/api/auth/resend")
+async def resend_code(body: dict = None):
+    """Resend verification code."""
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    
+    email = body.get("email", "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required.")
+    
+    code = generate_verification_code(email)
+    return {"status": "success", "message": "Verification code resent."}
+
+
+@app.post("/api/auth/login")
+async def login(body: dict = None):
+    """Login with email and password. Returns JWT token."""
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    
+    email = body.get("email", "").strip()
+    password = body.get("password", "")
+    
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required.")
+    
+    result = authenticate(email, password)
+    if "error" in result:
+        raise HTTPException(status_code=401, detail=result["error"])
+    
+    return {"status": "success", "data": result}
+
+
+@app.get("/api/auth/profile")
+async def get_profile(token: str = ""):
+    """Get user profile from JWT token."""
+    if not token:
+        raise HTTPException(status_code=401, detail="Token is required.")
+    
+    user = get_user_from_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+    
+    return {"status": "success", "data": user}
+
+
+@app.put("/api/auth/avatar")
+async def set_avatar(body: dict = None):
+    """Update user avatar."""
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    
+    token = body.get("token", "")
+    avatar_id = body.get("avatar_id", "")
+    
+    user = get_user_from_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+    
+    if update_avatar(user["id"], avatar_id):
+        return {"status": "success", "message": "Avatar updated."}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid avatar ID.")
 
 @app.get("/api/market_summary")
 async def get_market_summary():

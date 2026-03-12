@@ -9,3 +9,5 @@ scikit-learn
 tensorflow
 transformers
 torch
+pyjwt
+bcrypt
