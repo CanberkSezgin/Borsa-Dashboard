@@ -226,6 +226,7 @@ class _BorsaAppState extends State<BorsaApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      key: ValueKey(_token != null),  // Force Navigator rebuild on auth change
       title: _l10n[_lang]!['appTitle']!,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
