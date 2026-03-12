@@ -266,51 +266,48 @@ def merge_sentiment_into_ohlcv(ohlcv_df: pd.DataFrame,
     Merge daily sentiment scores into an hourly (or any freq) OHLCV DataFrame.
 
     Strategy:
-        • Normalise both indices to date-only for a left-join.
-        • Fill NaN days with neutral (0.0).
+        • Map sentiment by date (no pd.merge, avoids row multiplication).
+        • Forward-fill so news mood persists until the next piece of news.
     """
     print("\n[NLP] Merging sentiment into OHLCV DataFrame …")
 
     merged = ohlcv_df.copy()
     
-    # 1. Create a temporary 'MergeDate' column in the OHLCV data
-    # (yfinance index is usually 'Datetime' with timezone)
-    merged['MergeDate'] = pd.to_datetime(merged.index).date
+    # 1. Extract date-only key from the OHLCV index
+    merge_dates = pd.to_datetime(merged.index).date
     
-    # 2. Ensure daily_sentiment index is also date-only
-    daily_sentiment_copy = daily_sentiment.copy()
-    daily_sentiment_copy['MergeDate'] = pd.to_datetime(daily_sentiment_copy.index).date
+    # 2. Build a lookup dict from daily_sentiment
+    sent_lookup = {}
+    if not daily_sentiment.empty:
+        for idx, row in daily_sentiment.iterrows():
+            d = pd.to_datetime(idx).date()
+            sent_lookup[d] = {
+                "Sent_Positive": row["Sent_Positive"],
+                "Sent_Negative": row["Sent_Negative"],
+                "Sent_Neutral": row["Sent_Neutral"],
+                "Headline_Count": row["Headline_Count"],
+                "Sentiment_Score": row["Sentiment_Score"],
+            }
     
-    # 3. Perform the join
-    merged = merged.merge(
-        daily_sentiment_copy, 
-        on='MergeDate', 
-        how='left'
-    )
+    # 3. Map values by date (safe, no row multiplication)
+    sent_cols = ["Sent_Positive", "Sent_Negative", "Sent_Neutral",
+                 "Headline_Count", "Sentiment_Score"]
+    for col in sent_cols:
+        merged[col] = [sent_lookup.get(d, {}).get(col, np.nan) for d in merge_dates]
     
-    # 4. Forward-fill so that a piece of news from Monday 
-    # continues to influence the 'mood' until the next piece of news.
-    merged.sort_values('MergeDate', inplace=True)
-    
-    # We forward fill the sentiment scores so the chart doesn't look empty
+    # 4. Forward-fill so news mood persists until next piece of news
     for col in ["Sent_Positive", "Sent_Negative", "Sent_Neutral", "Sentiment_Score"]:
         merged[col] = merged[col].ffill()
-        
-    # Final fill for any remaining NaNs at the very start
+    
+    # 5. Fill any remaining NaNs at the start with neutral defaults
     merged["Sent_Positive"] = merged["Sent_Positive"].fillna(0.0)
     merged["Sent_Negative"] = merged["Sent_Negative"].fillna(0.0)
     merged["Sent_Neutral"] = merged["Sent_Neutral"].fillna(1.0)
     merged["Headline_Count"] = merged["Headline_Count"].fillna(0).astype(int)
     merged["Sentiment_Score"] = merged["Sentiment_Score"].fillna(0.0)
-    
-    # Restore the original index
-    merged.index = ohlcv_df.index
-    merged.drop(columns=['MergeDate'], inplace=True)
 
-    sent_cols = ["Sent_Positive", "Sent_Negative", "Sent_Neutral",
-                 "Headline_Count", "Sentiment_Score"]
-    print(f"[NLP] ✅ Time-aware Merge complete. New columns: {sent_cols}")
-    print(f"[NLP]    Matches found: {merged['Headline_Count'].sum()} total headlines across timeline.")
+    print(f"[NLP] ✅ Safe Merge complete. New columns: {sent_cols}")
+    print(f"[NLP]    Sentiment days matched: {len(sent_lookup)} | Total rows: {len(merged)}")
     
     return merged
 

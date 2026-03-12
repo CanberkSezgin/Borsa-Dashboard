@@ -3,6 +3,7 @@ uvicorn
 yfinance
 pandas
 pandas-ta-classic
+plotly
 numpy
 scikit-learn
 tensorflow

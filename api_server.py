@@ -174,7 +174,7 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
 
         # ── Step 5: LSTM Forecasting ──
         # Predict the next hour's probability of moving UP based on the latest context
-        forecast_result = generate_forecast(final_df, force_mock=False)
+        forecast_result = generate_forecast(final_df, force_mock=False, ticker=ticker)
 
         # ── Step 6: Build JSON response ──
         records = dataframe_to_json_records(final_df, n_rows=target_rows)
