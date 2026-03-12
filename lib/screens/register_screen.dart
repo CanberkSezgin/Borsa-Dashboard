@@ -96,7 +96,11 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
       final body = jsonDecode(response.body);
       if (response.statusCode == 200) {
         if (mounted) {
-          Navigator.pushNamed(context, '/verify', arguments: email);
+          final debugCode = body['debug_code'] as String? ?? '';
+          Navigator.pushNamed(context, '/verify', arguments: {
+            'email': email,
+            'debug_code': debugCode,
+          });
         }
       } else {
         setState(() => _error = body['detail'] ?? 'Registration failed.');

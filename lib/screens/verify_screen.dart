@@ -8,8 +8,14 @@ import '../design_tokens.dart';
 class VerifyScreen extends StatefulWidget {
   final String lang;
   final String email;
+  final String debugCode;
 
-  const VerifyScreen({super.key, required this.lang, required this.email});
+  const VerifyScreen({
+    super.key,
+    required this.lang,
+    required this.email,
+    this.debugCode = '',
+  });
 
   @override
   State<VerifyScreen> createState() => _VerifyScreenState();
@@ -20,6 +26,7 @@ class _VerifyScreenState extends State<VerifyScreen> with SingleTickerProviderSt
   final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
   bool _loading = false;
   String? _error;
+  String _currentCode = '';
   int _resendCooldown = 0;
   Timer? _cooldownTimer;
   late AnimationController _fadeCtrl;
@@ -29,6 +36,7 @@ class _VerifyScreenState extends State<VerifyScreen> with SingleTickerProviderSt
     super.initState();
     _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _fadeCtrl.forward();
+    _currentCode = widget.debugCode;
   }
 
   @override
@@ -78,13 +86,17 @@ class _VerifyScreenState extends State<VerifyScreen> with SingleTickerProviderSt
 
   Future<void> _resend() async {
     if (_resendCooldown > 0) return;
-    
+
     try {
-      await http.post(
+      final response = await http.post(
         Uri.parse('${DS.baseUrl}/api/auth/resend'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': widget.email}),
       );
+      final body = jsonDecode(response.body);
+      if (body['debug_code'] != null) {
+        setState(() => _currentCode = body['debug_code'] as String);
+      }
     } catch (_) {}
 
     setState(() => _resendCooldown = 60);
@@ -137,26 +149,53 @@ class _VerifyScreenState extends State<VerifyScreen> with SingleTickerProviderSt
                       style: TextStyle(color: DS.textSecondary, fontSize: 13),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF7ED),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.info_outline, color: Colors.orange, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            tr ? 'Kod konsola yazdırıldı (terminal)' : 'Code printed in console (terminal)',
-                            style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.w600),
+                    const SizedBox(height: 16),
+
+                    // ── Show verification code directly ──
+                    if (_currentCode.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFFF0FDF4), Color(0xFFECFDF5)],
                           ),
-                        ],
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: DS.emerald.withValues(alpha: 0.3)),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.key_rounded, color: DS.emerald, size: 18),
+                                const SizedBox(width: 8),
+                                Text(
+                                  tr ? 'Doğrulama Kodunuz' : 'Your Verification Code',
+                                  style: const TextStyle(color: DS.emerald, fontSize: 12, fontWeight: FontWeight.w700),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _currentCode,
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.w900,
+                                color: DS.deepBlue,
+                                letterSpacing: 8,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              tr ? '(Lokal geliştirme — gerçek e-posta gönderilmiyor)' 
+                                 : '(Local dev — no real email sent)',
+                              style: TextStyle(color: DS.textMuted, fontSize: 10),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 24),
 
                     // Code input boxes
                     Row(

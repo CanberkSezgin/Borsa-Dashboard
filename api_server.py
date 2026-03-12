@@ -240,7 +240,14 @@ async def register(body: dict = None):
     if "error" in result:
         raise HTTPException(status_code=409, detail=result["error"])
     
-    return {"status": "success", "message": "Verification code sent.", "data": result}
+    # Include code in response for local development (no real email server)
+    from user_db import _get_conn
+    conn = _get_conn()
+    row = conn.cursor().execute("SELECT code FROM verification_codes WHERE email = ?", (email.lower(),)).fetchone()
+    conn.close()
+    code = row['code'] if row else ''
+    
+    return {"status": "success", "message": "Verification code sent.", "data": result, "debug_code": code}
 
 
 @app.post("/api/auth/verify")
@@ -272,7 +279,7 @@ async def resend_code(body: dict = None):
         raise HTTPException(status_code=400, detail="Email is required.")
     
     code = generate_verification_code(email)
-    return {"status": "success", "message": "Verification code resent."}
+    return {"status": "success", "message": "Verification code resent.", "debug_code": code}
 
 
 @app.post("/api/auth/login")

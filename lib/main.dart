@@ -260,9 +260,13 @@ class _BorsaAppState extends State<BorsaApp> {
               builder: (_) => RegisterScreen(lang: _lang),
             );
           case '/verify':
-            final email = settings.arguments as String;
+            final args = settings.arguments as Map<String, dynamic>;
             return MaterialPageRoute(
-              builder: (_) => VerifyScreen(lang: _lang, email: email),
+              builder: (_) => VerifyScreen(
+                lang: _lang,
+                email: args['email'] as String,
+                debugCode: args['debug_code'] as String? ?? '',
+              ),
             );
           case '/avatar':
             final email = settings.arguments as String? ?? '';
