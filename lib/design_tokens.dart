@@ -62,43 +62,32 @@ class DS {
     ),
   ];
 
-  // ── Avatar data ──
-  static const List<Map<String, dynamic>> avatarList = [
-    {'id': 'business_man', 'icon': 'person', 'color': Color(0xFF1E40AF), 'bg': Color(0xFFDBEAFE)},
-    {'id': 'business_woman', 'icon': 'person_4', 'color': Color(0xFF9333EA), 'bg': Color(0xFFF3E8FF)},
-    {'id': 'classic_trader', 'icon': 'face_2', 'color': Color(0xFF92400E), 'bg': Color(0xFFFEF3C7)},
-    {'id': 'bull', 'icon': 'trending_up', 'color': Color(0xFF059669), 'bg': Color(0xFFD1FAE5)},
-    {'id': 'bear', 'icon': 'trending_down', 'color': Color(0xFFDC2626), 'bg': Color(0xFFFEE2E2)},
-    {'id': 'rocket', 'icon': 'rocket_launch', 'color': Color(0xFFEA580C), 'bg': Color(0xFFFFF7ED)},
-    {'id': 'diamond', 'icon': 'diamond', 'color': Color(0xFF0891B2), 'bg': Color(0xFFCFFAFE)},
-    {'id': 'moon', 'icon': 'nightlight', 'color': Color(0xFF4338CA), 'bg': Color(0xFFE0E7FF)},
-  ];
+  // ── Avatar Emoji Data ──
+  static const Map<String, Map<String, dynamic>> avatarData = {
+    'business_man':   {'emoji': '👨‍💼', 'color': Color(0xFF1E40AF), 'bg': Color(0xFFDBEAFE)},
+    'business_woman': {'emoji': '👩‍💼', 'color': Color(0xFF9333EA), 'bg': Color(0xFFF3E8FF)},
+    'classic_trader': {'emoji': '🎩', 'color': Color(0xFF92400E), 'bg': Color(0xFFFEF3C7)},
+    'bull':           {'emoji': '🐂', 'color': Color(0xFF059669), 'bg': Color(0xFFD1FAE5)},
+    'bear':           {'emoji': '🐻', 'color': Color(0xFFDC2626), 'bg': Color(0xFFFEE2E2)},
+    'rocket':         {'emoji': '🚀', 'color': Color(0xFFEA580C), 'bg': Color(0xFFFFF7ED)},
+    'diamond':        {'emoji': '💎', 'color': Color(0xFF0891B2), 'bg': Color(0xFFCFFAFE)},
+    'moon':           {'emoji': '🌙', 'color': Color(0xFF4338CA), 'bg': Color(0xFFE0E7FF)},
+  };
 
-  static IconData getAvatarIcon(String id) {
-    switch (id) {
-      case 'business_man': return Icons.person;
-      case 'business_woman': return Icons.person_4;
-      case 'classic_trader': return Icons.face_2;
-      case 'bull': return Icons.trending_up_rounded;
-      case 'bear': return Icons.trending_down_rounded;
-      case 'rocket': return Icons.rocket_launch_rounded;
-      case 'diamond': return Icons.diamond_rounded;
-      case 'moon': return Icons.nightlight_rounded;
-      default: return Icons.person;
-    }
+  static String getAvatarEmoji(String id) {
+    return avatarData[id]?['emoji'] as String? ?? '👨‍💼';
   }
 
   static Color getAvatarColor(String id) {
-    for (var av in avatarList) {
-      if (av['id'] == id) return av['color'] as Color;
-    }
-    return deepBlue;
+    return avatarData[id]?['color'] as Color? ?? deepBlue;
   }
 
   static Color getAvatarBg(String id) {
-    for (var av in avatarList) {
-      if (av['id'] == id) return av['bg'] as Color;
-    }
-    return surface;
+    return avatarData[id]?['bg'] as Color? ?? surface;
+  }
+
+  // Keep old method for backward compat, but return a generic icon
+  static IconData getAvatarIcon(String id) {
+    return Icons.person;
   }
 }

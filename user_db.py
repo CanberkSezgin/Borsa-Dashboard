@@ -17,6 +17,13 @@ import time
 import json
 from datetime import datetime, timedelta
 
+# Email service
+try:
+    from email_service import send_verification_email
+    EMAIL_AVAILABLE = True
+except ImportError:
+    EMAIL_AVAILABLE = False
+
 # Try importing optional deps
 try:
     import bcrypt
@@ -162,11 +169,17 @@ def create_user(username: str, email: str, password: str) -> dict:
     # Generate verification code
     code = generate_verification_code(email)
     
+    # Send real email
+    email_sent = False
+    if EMAIL_AVAILABLE:
+        email_sent = send_verification_email(email, username, code)
+    
     return {
         "id": user_id,
         "username": username,
         "email": email.lower(),
-        "verification_code_sent": True
+        "verification_code_sent": True,
+        "email_delivered": email_sent
     }
 
 
