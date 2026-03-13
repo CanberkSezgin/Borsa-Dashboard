@@ -140,8 +140,8 @@ class _MarketMarqueeState extends State<_MarketMarquee> {
     return Container(
       height: 40,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: DS.textMuted.withValues(alpha: 0.1), width: 1)),
+        color: DS.surface,
+        border: Border(bottom: BorderSide(color: DS.surfaceBorder.withValues(alpha: 0.3), width: 1)),
       ),
       child: ListView.builder(
         controller: _scrollController,
@@ -154,16 +154,17 @@ class _MarketMarqueeState extends State<_MarketMarquee> {
           final change = (item['change_pct'] as num).toDouble();
           final isPositive = change >= 0;
           final color = isPositive ? DS.emerald : DS.crimson;
-          final icon = isPositive ? Icons.arrow_upward : Icons.arrow_downward;
+          final arrow = isPositive ? '▲' : '▼';
           return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(symbol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: DS.textSecondary)),
+              Text(symbol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: DS.textMuted)),
               const SizedBox(width: 8),
-              Text(price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: DS.deepBlue)),
-              const SizedBox(width: 4),
-              Icon(icon, size: 12, color: color),
-              Text('${change.abs().toStringAsFixed(2)}%', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: color)),
+              Text(price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: DS.textPrimary)),
+              const SizedBox(width: 6),
+              Text('$arrow ${change.abs().toStringAsFixed(2)}%', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: color)),
+              const SizedBox(width: 16),
+              Container(width: 3, height: 3, decoration: BoxDecoration(color: DS.textMuted.withValues(alpha: 0.4), shape: BoxShape.circle)),
             ]),
           );
         },
@@ -234,7 +235,7 @@ class _BorsaAppState extends State<BorsaApp> {
         scaffoldBackgroundColor: DS.bg,
         colorScheme: ColorScheme.fromSeed(
           seedColor: DS.indigo,
-          brightness: Brightness.light,
+          brightness: Brightness.dark,
           surface: DS.surface,
           onSurface: DS.textPrimary,
         ),
@@ -426,7 +427,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final username = widget.user['username'] as String? ?? 'User';
         final email = widget.user['email'] as String? ?? '';
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          backgroundColor: DS.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           child: Container(
             padding: const EdgeInsets.all(28),
             constraints: const BoxConstraints(maxWidth: 340),
@@ -444,7 +446,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(username,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: DS.deepBlue)),
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: DS.textPrimary)),
                 const SizedBox(height: 4),
                 Text(email,
                   style: const TextStyle(fontSize: 13, color: DS.textSecondary)),
@@ -504,7 +506,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             style: const TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.w800,
-                              color: DS.deepBlue,
+                              color: DS.textPrimary,
                             ),
                           ),
                         ),
@@ -518,12 +520,37 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 32),
 
-                        if (_loading)
-                          Center(child: Column(children: [
-                            const CircularProgressIndicator(color: DS.indigo),
-                            const SizedBox(height: 16),
-                            Text(t('loading'), style: const TextStyle(color: DS.textSecondary, fontWeight: FontWeight.w600)),
-                          ])),
+                        if (_loading) ...[
+                          _PremiumCard(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                _SkeletonBar(width: 100, height: 10),
+                                const SizedBox(height: 20),
+                                _SkeletonBar(width: double.infinity, height: 28),
+                                const SizedBox(height: 12),
+                                _SkeletonBar(width: 180, height: 10),
+                                const SizedBox(height: 8),
+                                _SkeletonBar(width: double.infinity, height: 8),
+                              ]),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _PremiumCard(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                _SkeletonBar(width: 140, height: 10),
+                                const SizedBox(height: 16),
+                                _SkeletonBar(width: double.infinity, height: 200),
+                              ]),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Center(
+                            child: Text(t('loading'), style: const TextStyle(color: DS.textMuted, fontWeight: FontWeight.w600, fontSize: 13)),
+                          ),
+                        ],
 
                         if (_error != null)
                           _ErrorCard(message: _error!, onRetry: _analyze, lang: widget.lang),
@@ -585,41 +612,58 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildAppBar(String avatarId, String username) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFFFFFFF), Color(0xFFF1F5F9)],
-          begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        ),
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: DS.surface,
+        border: Border(bottom: BorderSide(color: DS.surfaceBorder.withValues(alpha: 0.3), width: 1)),
       ),
       child: Row(
         children: [
+          // Premium mini compound logo
           Container(
-            padding: const EdgeInsets.all(6),
+            width: 34, height: 34,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
                 colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
               ),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [BoxShadow(color: const Color(0xFF6366F1).withValues(alpha: 0.25), blurRadius: 8, offset: const Offset(0, 3))],
             ),
-            child: const Icon(Icons.show_chart_rounded, color: Colors.white, size: 18),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Positioned(
+                  left: 5, bottom: 7,
+                  child: Row(children: [
+                    Container(width: 3, height: 10, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(1.5))),
+                    const SizedBox(width: 2),
+                    Container(width: 3, height: 7, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(1.5))),
+                    const SizedBox(width: 2),
+                    Container(width: 3, height: 14, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(1.5))),
+                    const SizedBox(width: 2),
+                    Container(width: 3, height: 5, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(1.5))),
+                  ]),
+                ),
+                const Icon(Icons.trending_up_rounded, color: Colors.white, size: 16),
+              ],
+            ),
           ),
           const SizedBox(width: 12),
           Text(
             _l10n[widget.lang]!['appTitle']!.toUpperCase(),
             style: const TextStyle(
-              color: DS.deepBlue, fontSize: 16,
+              color: DS.textPrimary, fontSize: 15,
               fontWeight: FontWeight.w800, letterSpacing: 1.2,
             ),
           ),
           const Spacer(),
+          // Live indicator
           if (_lastFetchTime != null)
             Padding(
               padding: const EdgeInsets.only(right: 14),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.sync, color: DS.textMuted, size: 14),
-                const SizedBox(width: 4),
+                Container(width: 6, height: 6, decoration: const BoxDecoration(color: DS.emerald, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
                 Text(
                   '${_pad(_lastFetchTime!.hour)}:${_pad(_lastFetchTime!.minute)}:${_pad(_lastFetchTime!.second)}',
                   style: const TextStyle(color: DS.textSecondary, fontSize: 12, fontWeight: FontWeight.w700),
@@ -632,14 +676,13 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               margin: const EdgeInsets.only(right: 10),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-                boxShadow: DS.neumorphicShadow,
+                color: DS.surfaceAlt.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: DS.surfaceBorder.withValues(alpha: 0.5)),
               ),
               child: Text(
                 widget.lang == 'en' ? 'TR' : 'EN',
-                style: const TextStyle(color: DS.deepBlue, fontSize: 11, fontWeight: FontWeight.w800),
+                style: const TextStyle(color: DS.textPrimary, fontSize: 11, fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -651,8 +694,7 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: BoxDecoration(
                 color: DS.getAvatarBg(avatarId),
                 shape: BoxShape.circle,
-                border: Border.all(color: DS.getAvatarColor(avatarId).withValues(alpha: 0.3), width: 2),
-                boxShadow: DS.neumorphicShadow,
+                border: Border.all(color: DS.getAvatarColor(avatarId).withValues(alpha: 0.4), width: 2),
               ),
               child: Text(DS.getAvatarEmoji(avatarId),
                 style: const TextStyle(fontSize: 18)),
@@ -677,13 +719,12 @@ class _PremiumCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         gradient: customGradient ?? DS.cardGrad,
-        boxShadow: DS.neumorphicShadow,
-        border: Border.all(color: Colors.white, width: 2),
+        border: Border.all(color: DS.surfaceBorder.withValues(alpha: 0.3), width: 1),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         child: child,
       ),
     );
@@ -711,8 +752,8 @@ class _SearchBar extends StatelessWidget {
       Expanded(
         child: Container(
           decoration: BoxDecoration(
-            boxShadow: DS.neumorphicShadow,
             borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: DS.surfaceBorder.withValues(alpha: 0.4)),
           ),
           child: TextField(
             controller: controller,
@@ -724,7 +765,7 @@ class _SearchBar extends StatelessWidget {
               hintText: hint,
               hintStyle: const TextStyle(color: DS.textMuted, fontWeight: FontWeight.normal),
               prefixIcon: const Icon(Icons.search, color: DS.textMuted),
-              filled: true, fillColor: Colors.white,
+              filled: true, fillColor: DS.surface,
               contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
@@ -738,7 +779,7 @@ class _SearchBar extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: DS.indigo,
           foregroundColor: Colors.white,
-          elevation: 8,
+          elevation: 4,
           shadowColor: DS.indigo.withValues(alpha: 0.3),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
@@ -768,7 +809,7 @@ class _ErrorCard extends StatelessWidget {
         child: Column(children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(color: DS.crimsonSoft, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: DS.crimson.withValues(alpha: 0.15), shape: BoxShape.circle),
             child: const Icon(Icons.error_outline, color: DS.crimson, size: 28),
           ),
           const SizedBox(height: 12),
@@ -938,7 +979,7 @@ class _ScorePill extends StatelessWidget {
           duration: const Duration(milliseconds: 1200),
           curve: Curves.easeOutCubic,
           builder: (_, val, __) => Text('$label  ${val.toStringAsFixed(1)}%',
-            style: const TextStyle(color: DS.deepBlue, fontSize: 13, fontWeight: FontWeight.w700)),
+            style: const TextStyle(color: DS.textPrimary, fontSize: 13, fontWeight: FontWeight.w700)),
         ),
       ]),
     );
@@ -980,6 +1021,9 @@ class _ProChartSection extends StatelessWidget {
       }
     }
 
+    final isPositiveTrend = spots.isNotEmpty && spots.last.y >= spots.first.y;
+    final trendColor = isPositiveTrend ? DS.emerald : DS.crimson;
+
     FlSpot? predSpot;
     Color predColor = DS.neutral;
 
@@ -991,8 +1035,8 @@ class _ProChartSection extends StatelessWidget {
       if (targetPrice > maxY) maxY = targetPrice;
 
       final label = forecast!['forecast_label'] as String? ?? '';
-      final isBullish = label.toLowerCase().contains("up") || label.toLowerCase().contains("bull");
-      predColor = isBullish ? DS.emerald : DS.crimson;
+      final isPredBullish = label.toLowerCase().contains("up") || label.toLowerCase().contains("bull");
+      predColor = isPredBullish ? DS.emerald : DS.crimson;
     }
 
     final yPadding = (maxY - minY) * 0.1;
@@ -1034,13 +1078,13 @@ class _ProChartSection extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       decoration: BoxDecoration(
-                        color: isActive ? DS.indigo.withValues(alpha: 0.08) : Colors.transparent,
+                        color: isActive ? trendColor.withValues(alpha: 0.1) : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(r, style: TextStyle(
                         fontSize: 12,
                         fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                        color: isActive ? DS.indigo : DS.textMuted,
+                        color: isActive ? trendColor : DS.textMuted,
                       )),
                     ),
                   ),
@@ -1063,7 +1107,7 @@ class _ProChartSection extends StatelessWidget {
                   show: true, drawVerticalLine: false,
                   horizontalInterval: (maxY - minY) / 4,
                   getDrawingHorizontalLine: (value) => FlLine(
-                    color: DS.textMuted.withValues(alpha: 0.15), strokeWidth: 1, dashArray: [5, 5]),
+                    color: DS.textMuted.withValues(alpha: 0.1), strokeWidth: 1, dashArray: [4, 4]),
                 ),
                 titlesData: FlTitlesData(
                   show: true,
@@ -1085,12 +1129,12 @@ class _ProChartSection extends StatelessWidget {
                 lineBarsData: [
                   LineChartBarData(
                     spots: spots, isCurved: true, curveSmoothness: 0.2,
-                    color: DS.deepBlue, barWidth: 3, isStrokeCapRound: true,
+                    color: trendColor, barWidth: 2.5, isStrokeCapRound: true,
                     dotData: const FlDotData(show: false),
                     belowBarData: BarAreaData(
                       show: true,
                       gradient: LinearGradient(
-                        colors: [DS.deepBlue.withValues(alpha: 0.15), DS.deepBlue.withValues(alpha: 0.0)],
+                        colors: [trendColor.withValues(alpha: 0.2), trendColor.withValues(alpha: 0.0)],
                         begin: Alignment.topCenter, end: Alignment.bottomCenter,
                       ),
                     ),
@@ -1098,7 +1142,7 @@ class _ProChartSection extends StatelessWidget {
                   if (predSpot != null && spots.isNotEmpty)
                     LineChartBarData(
                       spots: [spots.last, predSpot],
-                      isCurved: false, color: predColor, barWidth: 3,
+                      isCurved: false, color: predColor, barWidth: 2.5,
                       isStrokeCapRound: true, dashArray: [5, 5],
                       dotData: FlDotData(
                         show: true,
@@ -1114,10 +1158,24 @@ class _ProChartSection extends StatelessWidget {
                     ),
                 ],
                 lineTouchData: LineTouchData(
+                  getTouchedSpotIndicator: (barData, spotIndexes) {
+                    return spotIndexes.map((index) {
+                      return TouchedSpotIndicatorData(
+                        FlLine(color: DS.textMuted.withValues(alpha: 0.3), strokeWidth: 1.5, dashArray: [4, 4]),
+                        FlDotData(
+                          show: true,
+                          getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
+                            radius: 4, color: trendColor, strokeWidth: 2, strokeColor: Colors.white,
+                          ),
+                        ),
+                      );
+                    }).toList();
+                  },
                   touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (_) => DS.deepBlue.withValues(alpha: 0.8),
                     getTooltipItems: (touchedSpots) => touchedSpots.map((spot) =>
                       LineTooltipItem('\$${spot.y.toStringAsFixed(2)}',
-                        const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))).toList(),
+                        const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))).toList(),
                   ),
                 ),
               ),
@@ -1159,53 +1217,117 @@ class _RecentNewsSection extends StatelessWidget {
             ),
           )
         else
-          ...news.map((item) {
-            final title = item['title'] as String? ?? '';
-            final publisher = item['publisher'] as String? ?? '';
-            final link = item['link'] as String? ?? '';
+          _PremiumCard(
+            child: Column(
+              children: news.asMap().entries.map((entry) {
+                final i = entry.key;
+                final item = entry.value;
+                final title = item['title'] as String? ?? '';
+                final publisher = item['publisher'] as String? ?? '';
+                final link = item['link'] as String? ?? '';
+                final initial = publisher.isNotEmpty ? publisher[0].toUpperCase() : 'N';
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _PremiumCard(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: link.isNotEmpty ? () => launchUrl(Uri.parse(link)) : null,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: DS.surfaceAlt, borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white, width: 1.5),
-                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))],
-                          ),
-                          child: const Icon(Icons.article_rounded, color: DS.deepBlue, size: 20),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(title,
-                              style: const TextStyle(color: DS.textPrimary, fontSize: 14,
-                                fontWeight: FontWeight.w600, height: 1.4)),
-                            if (publisher.isNotEmpty)
+                return Column(
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: link.isNotEmpty ? () => launchUrl(Uri.parse(link)) : null,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Container(
+                              width: 36, height: 36,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: DS.indigo.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(initial,
+                                style: const TextStyle(color: DS.indigo, fontSize: 14, fontWeight: FontWeight.w800)),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(title,
+                                  style: const TextStyle(color: DS.textPrimary, fontSize: 14,
+                                    fontWeight: FontWeight.w600, height: 1.4)),
+                                if (publisher.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 5),
+                                    child: Text(publisher.toUpperCase(),
+                                      style: const TextStyle(color: DS.textMuted, fontSize: 10,
+                                        fontWeight: FontWeight.w800, letterSpacing: 1.0)),
+                                  ),
+                              ]),
+                            ),
+                            if (link.isNotEmpty)
                               Padding(
-                                padding: const EdgeInsets.only(top: 6),
-                                child: Text(publisher.toUpperCase(),
-                                  style: const TextStyle(color: DS.textMuted, fontSize: 10,
-                                    fontWeight: FontWeight.w800, letterSpacing: 1.0)),
+                                padding: const EdgeInsets.only(left: 8, top: 2),
+                                child: Icon(Icons.open_in_new_rounded, size: 14, color: DS.textMuted.withValues(alpha: 0.6)),
                               ),
                           ]),
                         ),
-                      ]),
+                      ),
                     ),
-                  ),
-                ),
-              ),
-            );
-          }),
+                    if (i < news.length - 1)
+                      Divider(height: 1, color: DS.surfaceBorder.withValues(alpha: 0.3), indent: 16, endIndent: 16),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SKELETON LOADING BAR
+// ─────────────────────────────────────────────────────────────────
+class _SkeletonBar extends StatefulWidget {
+  final double width;
+  final double height;
+
+  const _SkeletonBar({required this.width, required this.height});
+
+  @override
+  State<_SkeletonBar> createState() => _SkeletonBarState();
+}
+
+class _SkeletonBarState extends State<_SkeletonBar> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (_, __) {
+        final opacity = 0.06 + (_controller.value * 0.08);
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: opacity),
+            borderRadius: BorderRadius.circular(widget.height / 2),
+          ),
+        );
+      },
     );
   }
 }
