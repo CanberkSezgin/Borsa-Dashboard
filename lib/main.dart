@@ -12,6 +12,7 @@ import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/verify_screen.dart';
 import 'screens/avatar_screen.dart';
+import 'screens/portfolio_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────
 //  LOCALISATION
@@ -337,6 +338,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _forecast;
   List<Map<String, dynamic>>? _recentNews;
   List<dynamic> _marketSummary = [];
+  Map<String, dynamic>? _modelStats;
+  Map<String, dynamic>? _multiTimeframe;
 
   Timer? _refreshTimer;
   DateTime? _lastFetchTime;
@@ -400,8 +403,11 @@ class _HomeScreenState extends State<HomeScreen> {
             _forecast = body['forecast'] as Map<String, dynamic>?;
             _recentNews = (body['recent_news'] as List<dynamic>?)
                 ?.map((e) => e as Map<String, dynamic>).toList();
+            _modelStats = body['model_stats'] as Map<String, dynamic>?;
             _lastFetchTime = DateTime.now();
           });
+          // Fetch multi-timeframe in the background
+          _fetchMultiTimeframe(ticker);
           if (!isAutoRefresh) {
             _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
               _analyze(isAutoRefresh: true);
@@ -417,6 +423,53 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (!isAutoRefresh) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _fetchMultiTimeframe(String ticker) async {
+    try {
+      final uri = Uri.parse('${DS.baseUrl}/api/multi-timeframe/$ticker');
+      final response = await http.get(uri).timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200 && mounted) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        setState(() => _multiTimeframe = body);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _executeTrade(String action) async {
+    final ticker = _tickerCtrl.text.trim().toUpperCase();
+    if (ticker.isEmpty || _data == null) return;
+
+    final price = (_data!['Close'] as num?)?.toDouble() ?? 0;
+    if (price <= 0) return;
+
+    // Default 1 share per trade
+    try {
+      final uri = Uri.parse('${DS.baseUrl}/api/portfolio/trade');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'token': widget.token,
+          'ticker': ticker,
+          'action': action,
+          'price': price,
+          'shares': 1,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200 && mounted) {
+        final body = jsonDecode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(body['message'] ?? 'Trade executed'),
+            backgroundColor: action == 'BUY' ? DS.emerald : DS.crimson,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   void _showProfileDialog() {
@@ -564,6 +617,45 @@ class _HomeScreenState extends State<HomeScreen> {
                                 forecast: _forecast!, lang: widget.lang,
                               ),
                             ),
+                            const SizedBox(height: 12),
+                            // ── BUY / SELL Buttons ──
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 44,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => _executeTrade('BUY'),
+                                      icon: const Icon(Icons.arrow_downward_rounded, size: 16),
+                                      label: Text(widget.lang == 'tr' ? 'AL' : 'BUY',
+                                        style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: DS.emerald,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 44,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => _executeTrade('SELL'),
+                                      icon: const Icon(Icons.arrow_upward_rounded, size: 16),
+                                      label: Text(widget.lang == 'tr' ? 'SAT' : 'SELL',
+                                        style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: DS.crimson,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                             const SizedBox(height: 16),
                           ],
                           AnimatedSwitcher(
@@ -586,6 +678,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               },
                             ),
                           ),
+                          if (_multiTimeframe != null) ...[
+                            const SizedBox(height: 16),
+                            _MultiTimeframeCard(
+                              data: _multiTimeframe!,
+                              lang: widget.lang,
+                            ),
+                          ],
                           if (_recentNews != null) ...[
                             const SizedBox(height: 32),
                             AnimatedSwitcher(
@@ -594,6 +693,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 key: ValueKey('news_${_lastFetchTime?.millisecondsSinceEpoch}'),
                                 news: _recentNews!, lang: widget.lang,
                               ),
+                            ),
+                          ],
+                          if (_modelStats != null) ...[
+                            const SizedBox(height: 32),
+                            _ModelPerformanceCard(
+                              stats: _modelStats!,
+                              lang: widget.lang,
+                              ticker: _tickerCtrl.text.trim().toUpperCase(),
                             ),
                           ],
                           const SizedBox(height: 40),
@@ -698,6 +805,28 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: Text(DS.getAvatarEmoji(avatarId),
                 style: const TextStyle(fontSize: 18)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Portfolio button
+          GestureDetector(
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => PortfolioScreen(
+                  token: widget.token,
+                  user: widget.user,
+                  lang: widget.lang,
+                ),
+              ));
+            },
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: DS.surfaceAlt.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: DS.surfaceBorder.withValues(alpha: 0.5)),
+              ),
+              child: const Icon(Icons.account_balance_wallet_rounded, color: DS.indigo, size: 18),
             ),
           ),
         ],
@@ -1328,6 +1457,322 @@ class _SkeletonBarState extends State<_SkeletonBar> with SingleTickerProviderSta
           ),
         );
       },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  MULTI-TIMEFRAME ANALYSIS CARD
+// ─────────────────────────────────────────────────────────────────
+class _MultiTimeframeCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final String lang;
+
+  const _MultiTimeframeCard({required this.data, required this.lang});
+
+  @override
+  Widget build(BuildContext context) {
+    final timeframes = data['timeframes'] as List<dynamic>? ?? [];
+    final consensus = data['consensus'] as String? ?? 'neutral';
+
+    Color consensusColor;
+    IconData consensusIcon;
+    if (consensus == 'bullish') {
+      consensusColor = DS.emerald;
+      consensusIcon = Icons.trending_up_rounded;
+    } else if (consensus == 'bearish') {
+      consensusColor = DS.crimson;
+      consensusIcon = Icons.trending_down_rounded;
+    } else {
+      consensusColor = DS.amber;
+      consensusIcon = Icons.trending_flat_rounded;
+    }
+
+    return _PremiumCard(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.layers_rounded, color: DS.indigo, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  lang == 'tr' ? 'ÇOKLU ZAMAN DİLİMİ' : 'MULTI-TIMEFRAME',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: DS.textMuted, letterSpacing: 1.5),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ...timeframes.map((tf) {
+              final signal = tf['signal'] as String? ?? 'neutral';
+              final rsi = tf['rsi']?.toString() ?? '-';
+              final macd = tf['macd']?.toString() ?? '-';
+              final label = tf['timeframe'] as String? ?? '';
+              Color dotColor = signal == 'bullish' ? DS.emerald : (signal == 'bearish' ? DS.crimson : DS.amber);
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 10, height: 10,
+                      decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 36,
+                      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700, color: DS.textPrimary, fontSize: 13)),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'RSI: $rsi  •  MACD: $macd',
+                        style: const TextStyle(color: DS.textSecondary, fontSize: 12),
+                      ),
+                    ),
+                    Text(
+                      signal.toUpperCase(),
+                      style: TextStyle(
+                        color: dotColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const Divider(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(consensusIcon, color: consensusColor, size: 22),
+                const SizedBox(width: 8),
+                Text(
+                  '${lang == 'tr' ? 'Konsensüs' : 'Consensus'}: ${consensus.toUpperCase()}',
+                  style: TextStyle(
+                    color: consensusColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  MODEL PERFORMANCE CARD (A/B Testing) — Tappable
+// ─────────────────────────────────────────────────────────────────
+class _ModelPerformanceCard extends StatelessWidget {
+  final Map<String, dynamic> stats;
+  final String lang;
+  final String ticker;
+
+  const _ModelPerformanceCard({required this.stats, required this.lang, required this.ticker});
+
+  void _showHistory(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: DS.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => _PredictionHistorySheet(ticker: ticker, lang: lang),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final winRate = (stats['win_rate'] as num?)?.toDouble() ?? 0.0;
+    final totalResolved = stats['total_resolved'] as int? ?? 0;
+    final wins = stats['wins'] as int? ?? 0;
+    final losses = stats['losses'] as int? ?? 0;
+    final pending = stats['pending'] as int? ?? 0;
+    Color rateColor = winRate >= 55 ? DS.emerald : (winRate >= 45 ? DS.amber : DS.crimson);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 16),
+          child: Text(
+            lang == 'tr' ? 'MODEL PERFORMANSI' : 'MODEL PERFORMANCE',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: DS.textMuted, letterSpacing: 1.5),
+          ),
+        ),
+        _PremiumCard(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(children: [
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.psychology_rounded, color: DS.indigo, size: 24),
+                const SizedBox(width: 10),
+                const Text('AI Win Rate', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: DS.textPrimary)),
+              ]),
+              const SizedBox(height: 16),
+              Text('${winRate.toStringAsFixed(1)}%',
+                style: TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: rateColor, letterSpacing: -1)),
+              const SizedBox(height: 6),
+              Text('$totalResolved ${lang == 'tr' ? 'tahmin sonuclandi' : 'predictions resolved'}',
+                style: const TextStyle(color: DS.textMuted, fontSize: 12)),
+              const SizedBox(height: 20),
+              GestureDetector(
+                onTap: () => _showHistory(context),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  decoration: BoxDecoration(color: DS.surfaceAlt.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(12)),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                    _StatChip(label: lang == 'tr' ? 'Kazanc' : 'Wins', value: '$wins', color: DS.emerald),
+                    _StatChip(label: lang == 'tr' ? 'Kayip' : 'Losses', value: '$losses', color: DS.crimson),
+                    _StatChip(label: lang == 'tr' ? 'Bekleyen' : 'Pending', value: '$pending', color: DS.amber),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(lang == 'tr' ? 'Detaylar icin dokunun' : 'Tap for details',
+                style: const TextStyle(color: DS.textMuted, fontSize: 10, fontStyle: FontStyle.italic)),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  const _StatChip({required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: color)),
+      const SizedBox(height: 4),
+      Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: DS.textMuted, letterSpacing: 0.5)),
+    ]);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  PREDICTION HISTORY BOTTOM SHEET
+// ─────────────────────────────────────────────────────────────────
+class _PredictionHistorySheet extends StatefulWidget {
+  final String ticker;
+  final String lang;
+  const _PredictionHistorySheet({required this.ticker, required this.lang});
+  @override
+  State<_PredictionHistorySheet> createState() => _PredictionHistorySheetState();
+}
+
+class _PredictionHistorySheetState extends State<_PredictionHistorySheet> {
+  List<Map<String, dynamic>> _history = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final res = await http.get(
+        Uri.parse('${DS.baseUrl}/api/model-stats/${widget.ticker}/history'),
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200 && mounted) {
+        final body = jsonDecode(res.body);
+        _history = ((body['history'] as List<dynamic>?) ?? []).map((e) => e as Map<String, dynamic>).toList();
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.65, maxChildSize: 0.9, minChildSize: 0.4, expand: false,
+      builder: (_, sc) => Column(children: [
+        Container(margin: const EdgeInsets.only(top: 12, bottom: 8), width: 40, height: 4,
+          decoration: BoxDecoration(color: DS.textMuted.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(2))),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(children: [
+            Icon(Icons.history_rounded, color: DS.indigo, size: 20),
+            const SizedBox(width: 10),
+            Text('${widget.ticker} ${widget.lang == 'tr' ? 'Tahmin Gecmisi' : 'Prediction History'}',
+              style: const TextStyle(color: DS.textPrimary, fontSize: 15, fontWeight: FontWeight.w800)),
+          ]),
+        ),
+        const Divider(height: 1, color: DS.surfaceBorder),
+        Expanded(
+          child: _loading
+            ? const Center(child: CircularProgressIndicator(color: DS.indigo))
+            : _history.isEmpty
+              ? Center(child: Text(widget.lang == 'tr' ? 'Henuz tahmin gecmisi yok.' : 'No prediction history yet.',
+                  style: const TextStyle(color: DS.textSecondary, fontSize: 13)))
+              : ListView.builder(
+                  controller: sc, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  itemCount: _history.length,
+                  itemBuilder: (_, i) {
+                    final p = _history[i];
+                    final dir = p['predicted_direction'] as String? ?? '';
+                    final wc = p['was_correct'];
+                    final conf = (p['confidence'] as num?)?.toDouble() ?? 0;
+                    final priceAt = (p['price_at_prediction'] as num?)?.toDouble() ?? 0;
+                    final created = p['created_at'] as String? ?? '';
+                    final resolved = p['resolved_at'] as String? ?? '';
+                    final isPending = wc == null;
+
+                    final Color sc2;
+                    final IconData si;
+                    final String sl;
+                    if (isPending) { sc2 = DS.amber; si = Icons.pending_rounded; sl = widget.lang == 'tr' ? 'Bekliyor' : 'Pending'; }
+                    else if (wc == 1) { sc2 = DS.emerald; si = Icons.check_circle_rounded; sl = widget.lang == 'tr' ? 'Kazanc' : 'Win'; }
+                    else { sc2 = DS.crimson; si = Icons.cancel_rounded; sl = widget.lang == 'tr' ? 'Kayip' : 'Loss'; }
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: DS.bg, borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: sc2.withValues(alpha: 0.2))),
+                      child: Row(children: [
+                        Container(width: 36, height: 36,
+                          decoration: BoxDecoration(color: sc2.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+                          alignment: Alignment.center, child: Icon(si, color: sc2, size: 18)),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            Text(sl, style: TextStyle(color: sc2, fontWeight: FontWeight.w800, fontSize: 13)),
+                            const SizedBox(width: 8),
+                            Text('${dir.toUpperCase()} @ \$${priceAt.toStringAsFixed(2)}',
+                              style: const TextStyle(color: DS.textSecondary, fontSize: 11)),
+                          ]),
+                          Text('${widget.lang == 'tr' ? 'Guven' : 'Conf'}: ${(conf * 100).toStringAsFixed(1)}%',
+                            style: const TextStyle(color: DS.textMuted, fontSize: 10)),
+                        ])),
+                        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                          Text(created.length >= 16 ? created.substring(0, 16) : created,
+                            style: const TextStyle(color: DS.textMuted, fontSize: 9)),
+                          if (!isPending && resolved.isNotEmpty)
+                            Text(resolved.length >= 16 ? resolved.substring(0, 16) : resolved,
+                              style: const TextStyle(color: DS.textMuted, fontSize: 9)),
+                        ]),
+                      ]),
+                    );
+                  }),
+        ),
+      ]),
     );
   }
 }

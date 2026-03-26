@@ -27,8 +27,12 @@ from lstm_forecast import generate_forecast
 from user_db import (
     create_user, verify_code, authenticate,
     get_user_from_token, update_avatar,
-    generate_verification_code
+    generate_verification_code,
+    log_prediction, get_prediction_stats,
+    cache_news, get_cached_news,
+    add_trade, get_portfolio, get_trade_history,
 )
+from ab_tracker import log_ab_prediction, resolve_pending_predictions, get_model_performance
 
 
 # ─────────────────────────────────────────────
@@ -181,6 +185,11 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
         # Predict the next hour's probability of moving UP based on the latest context
         forecast_result = generate_forecast(final_df, force_mock=False, ticker=ticker)
 
+        # ── Step 5b: A/B Prediction Logging ──
+        current_price = float(final_df.iloc[-1]["Close"])
+        resolve_pending_predictions(ticker, current_price)
+        log_ab_prediction(ticker, forecast_result, current_price)
+
         # ── Step 6: Build JSON response ──
         records = dataframe_to_json_records(final_df, n_rows=target_rows)
         
@@ -195,6 +204,12 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
             for h in headlines[:5]
         ]
 
+        # ── Step 7b: Cache News ──
+        cache_news(ticker, recent_news_list)
+
+        # ── Step 8: Get Model Stats ──
+        model_perf = get_prediction_stats(ticker)
+
         return {
             "status": "success",
             "ticker": ticker,
@@ -203,6 +218,7 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
             "columns": list(final_df.columns),
             "forecast": forecast_result,
             "recent_news": recent_news_list,
+            "model_stats": model_perf,
             "data": records,
         }
 
@@ -393,6 +409,217 @@ async def get_market_summary():
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Market summary error: {str(e)}")
+
+
+# ─────────────────────────────────────────────
+#  MULTI-TIMEFRAME ANALYSIS
+# ─────────────────────────────────────────────
+@app.get("/api/multi-timeframe/{ticker}")
+async def multi_timeframe(ticker: str):
+    """Analyze a ticker across 1h, 4h, and 1d timeframes."""
+    import asyncio
+    ticker = ticker.upper()
+
+    timeframes = [
+        {"label": "1H", "period": "30d", "interval": "1h"},
+        {"label": "4H", "period": "60d", "interval": "1d"},  # 4h not supported by yfinance, use 1d as proxy
+        {"label": "1D", "period": "1y", "interval": "1d"},
+    ]
+
+    def analyze_tf(tf):
+        try:
+            data = fetch_stock_data(ticker, period=tf["period"], interval=tf["interval"])
+            enriched = add_technical_indicators(data)
+            last = enriched.iloc[-1]
+            rsi = float(last.get("RSI_14", 50))
+            macd = float(last.get("MACD", 0))
+            close = float(last.get("Close", 0))
+
+            # Determine signal
+            bullish_signals = 0
+            if rsi < 50: bullish_signals += 1
+            if macd > 0: bullish_signals += 1
+            signal = "bullish" if bullish_signals >= 2 else ("bearish" if bullish_signals == 0 else "neutral")
+
+            return {
+                "timeframe": tf["label"],
+                "close": round(close, 2),
+                "rsi": round(rsi, 1),
+                "macd": round(macd, 4),
+                "signal": signal,
+            }
+        except Exception as e:
+            return {"timeframe": tf["label"], "error": str(e)}
+
+    try:
+        tasks = [asyncio.to_thread(analyze_tf, tf) for tf in timeframes]
+        results = await asyncio.gather(*tasks)
+
+        # Combined consensus
+        signals = [r.get("signal") for r in results if "signal" in r]
+        bullish_count = signals.count("bullish")
+        bearish_count = signals.count("bearish")
+        if bullish_count > bearish_count:
+            consensus = "bullish"
+        elif bearish_count > bullish_count:
+            consensus = "bearish"
+        else:
+            consensus = "neutral"
+
+        return {"status": "success", "ticker": ticker, "timeframes": results, "consensus": consensus}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+#  PREDICTION STATS / A-B TESTING
+# ─────────────────────────────────────────────
+@app.get("/api/prediction-stats/{ticker}")
+async def prediction_stats(ticker: str):
+    """Get prediction accuracy stats for a ticker."""
+    stats = get_prediction_stats(ticker.upper())
+    return {"status": "success", "data": stats}
+
+
+@app.get("/api/model-stats/{ticker}")
+async def model_stats(ticker: str):
+    """Get comprehensive A/B model performance metrics."""
+    performance = get_model_performance(ticker.upper())
+    return {"status": "success", "data": performance}
+
+
+@app.get("/api/model-stats/{ticker}/history")
+async def model_stats_history(ticker: str):
+    """Get detailed prediction history for a ticker."""
+    from user_db import get_prediction_history
+    history = get_prediction_history(ticker.upper())
+    return {"status": "success", "history": history}
+
+
+# ─────────────────────────────────────────────
+#  PORTFOLIO (PAPER TRADING)
+# ─────────────────────────────────────────────
+@app.post("/api/portfolio/trade")
+async def execute_trade(body: dict = None):
+    """Execute a paper trade (BUY/SELL)."""
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+
+    token = body.get("token", "")
+    user = get_user_from_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+
+    ticker = body.get("ticker", "").upper()
+    action = body.get("action", "").upper()
+    price = body.get("price", 0)
+    shares = body.get("shares", 0)
+
+    if not ticker or action not in ("BUY", "SELL") or price <= 0 or shares <= 0:
+        raise HTTPException(status_code=400, detail="Invalid trade parameters.")
+
+    result = add_trade(user["id"], ticker, action, price, shares)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["message"])
+    return {"status": "success", "trade_id": result["trade_id"], "message": result["message"]}
+
+
+@app.get("/api/portfolio/{user_id}")
+async def portfolio(user_id: int):
+    """Get current portfolio holdings with live prices."""
+    holdings = get_portfolio(user_id)
+
+    # Fetch live prices for each holding
+    for h in holdings:
+        try:
+            import yfinance as yf
+            t = yf.Ticker(h["ticker"])
+            info = t.fast_info
+            live_price = float(info.get("lastPrice", 0) or info.get("previousClose", 0))
+            h["live_price"] = round(live_price, 2)
+            h["current_value"] = round(live_price * h["net_shares"], 2)
+            avg_cost = h["net_cost"] / h["net_shares"] if h["net_shares"] > 0 else 0
+            h["avg_cost"] = round(avg_cost, 2)
+            h["pnl"] = round(h["current_value"] - h["net_cost"], 2)
+            h["pnl_pct"] = round((h["pnl"] / h["net_cost"] * 100), 1) if h["net_cost"] > 0 else 0.0
+        except Exception:
+            h["live_price"] = 0
+            h["current_value"] = 0
+            h["pnl"] = 0
+            h["pnl_pct"] = 0
+
+    return {"status": "success", "holdings": holdings}
+
+
+@app.get("/api/portfolio/{user_id}/history")
+async def portfolio_history(user_id: int):
+    """Get trade history."""
+    history = get_trade_history(user_id)
+    return {"status": "success", "history": history}
+
+
+# ─────────────────────────────────────────────
+#  WEBSOCKET LIVE DATA
+# ─────────────────────────────────────────────
+from starlette.websockets import WebSocket, WebSocketDisconnect
+import asyncio
+import json as json_lib
+
+@app.websocket("/ws/{ticker}")
+async def websocket_endpoint(websocket: WebSocket, ticker: str):
+    """
+    WebSocket endpoint that pushes live analysis updates every 60 seconds.
+    On connect, immediately sends the latest data.
+    """
+    await websocket.accept()
+    ticker = ticker.upper()
+    print(f"[WS] Client connected for {ticker}")
+
+    try:
+        while True:
+            try:
+                # Run the full pipeline
+                raw_data = fetch_stock_data(ticker)
+                enriched = add_technical_indicators(raw_data)
+                headlines = get_real_headlines(ticker)
+                scored = classify_headlines(finbert_classifier, headlines)
+                daily_sentiment = aggregate_daily_sentiment(scored)
+                final_df = merge_sentiment_into_ohlcv(enriched, daily_sentiment)
+                forecast_result = generate_forecast(final_df, force_mock=False, ticker=ticker)
+                records = dataframe_to_json_records(final_df, n_rows=10)
+
+                # Resolve pending A/B predictions
+                current_price = float(final_df.iloc[-1]["Close"])
+                resolve_pending_predictions(ticker, current_price)
+                log_ab_prediction(ticker, forecast_result, current_price)
+
+                # Cache news
+                recent_news_list = [
+                    {"title": h.get("headline", ""), "publisher": h.get("publisher", ""), "link": h.get("link", "")}
+                    for h in headlines[:5]
+                ]
+                cache_news(ticker, recent_news_list)
+
+                payload = {
+                    "ticker": ticker,
+                    "forecast": forecast_result,
+                    "recent_news": recent_news_list,
+                    "data": records,
+                    "model_stats": get_prediction_stats(ticker),
+                }
+
+                await websocket.send_text(json_lib.dumps(payload, default=str))
+                print(f"[WS] Pushed update for {ticker}")
+
+            except Exception as e:
+                error_payload = {"error": str(e)}
+                await websocket.send_text(json_lib.dumps(error_payload))
+
+            # Wait 60 seconds before next push
+            await asyncio.sleep(60)
+
+    except WebSocketDisconnect:
+        print(f"[WS] Client disconnected for {ticker}")
 
 
 # ─────────────────────────────────────────────

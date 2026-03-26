@@ -73,10 +73,59 @@ def init_db():
             expires_at REAL NOT NULL
         )
     """)
-    
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS prediction_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            predicted_direction TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            actual_direction TEXT,
+            was_correct INTEGER,
+            price_at_prediction REAL,
+            price_at_resolution REAL,
+            predicted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS news_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            title TEXT NOT NULL,
+            publisher TEXT,
+            link TEXT,
+            sentiment_score REAL,
+            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, ticker)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            action TEXT NOT NULL,
+            price REAL NOT NULL,
+            shares REAL NOT NULL,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
-    print("[AUTH] ✅ Database initialized.")
+    print("[AUTH] ✅ Database initialized (users, predictions, news_cache, watchlist, portfolio).")
 
 
 def _hash_password(password: str) -> str:
@@ -261,6 +310,176 @@ def update_avatar(user_id: int, avatar_id: str) -> bool:
     conn.commit()
     conn.close()
     return True
+
+
+# ─────────────────────────────────────────────
+#  PREDICTION LOG FUNCTIONS
+# ─────────────────────────────────────────────
+def log_prediction(ticker: str, predicted_direction: str, confidence: float, price_at_prediction: float) -> int:
+    """Log an LSTM prediction. Returns the log ID."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO prediction_logs (ticker, predicted_direction, confidence, price_at_prediction) VALUES (?, ?, ?, ?)",
+        (ticker.upper(), predicted_direction, confidence, price_at_prediction)
+    )
+    conn.commit()
+    log_id = cursor.lastrowid
+    conn.close()
+    return log_id
+
+
+def resolve_prediction(log_id: int, actual_direction: str, price_at_resolution: float):
+    """Update a prediction log with the actual outcome."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT predicted_direction FROM prediction_logs WHERE id = ?", (log_id,))
+    row = cursor.fetchone()
+    if row:
+        was_correct = 1 if row['predicted_direction'].lower() == actual_direction.lower() else 0
+        cursor.execute(
+            "UPDATE prediction_logs SET actual_direction=?, was_correct=?, price_at_resolution=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+            (actual_direction, was_correct, price_at_resolution, log_id)
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_prediction_stats(ticker: str) -> dict:
+    """Get win rate and prediction statistics for a ticker."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) as total, SUM(CASE WHEN was_correct=1 THEN 1 ELSE 0 END) as wins FROM prediction_logs WHERE ticker=? AND was_correct IS NOT NULL",
+        (ticker.upper(),)
+    )
+    row = cursor.fetchone()
+    total = row['total'] or 0
+    wins = row['wins'] or 0
+    
+    cursor.execute(
+        "SELECT COUNT(*) as pending FROM prediction_logs WHERE ticker=? AND was_correct IS NULL",
+        (ticker.upper(),)
+    )
+    pending = cursor.fetchone()['pending'] or 0
+    conn.close()
+    
+    return {
+        "ticker": ticker.upper(),
+        "total_resolved": total,
+        "wins": wins,
+        "losses": total - wins,
+        "win_rate": round((wins / total * 100), 1) if total > 0 else 0.0,
+        "pending": pending,
+    }
+
+
+# ─────────────────────────────────────────────
+#  NEWS CACHE FUNCTIONS
+# ─────────────────────────────────────────────
+def cache_news(ticker: str, news_items: list):
+    """Cache news headlines for a ticker."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    for item in news_items:
+        cursor.execute(
+            "INSERT INTO news_cache (ticker, title, publisher, link, sentiment_score) VALUES (?, ?, ?, ?, ?)",
+            (ticker.upper(), item.get('title', ''), item.get('publisher', ''), item.get('link', ''), item.get('sentiment_score'))
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_cached_news(ticker: str, limit: int = 10) -> list:
+    """Get cached news for a ticker (most recent first)."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT title, publisher, link, sentiment_score, fetched_at FROM news_cache WHERE ticker=? ORDER BY fetched_at DESC LIMIT ?",
+        (ticker.upper(), limit)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────
+#  PORTFOLIO FUNCTIONS
+# ─────────────────────────────────────────────
+def add_trade(user_id: int, ticker: str, action: str, price: float, shares: float) -> dict:
+    """Record a paper trade. Returns trade dict with id and status."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    ticker = ticker.upper()
+    action = action.upper()
+
+    # ── Short-sell prevention ──
+    if action == "SELL":
+        cursor.execute("""
+            SELECT COALESCE(SUM(CASE WHEN action='BUY' THEN shares ELSE -shares END), 0) as net
+            FROM portfolio_trades WHERE user_id=? AND ticker=?
+        """, (user_id, ticker))
+        current_net = cursor.fetchone()["net"]
+        if current_net < shares:
+            conn.close()
+            return {"error": True, "message": f"Insufficient shares. You own {current_net:.2f} shares of {ticker}."}
+
+    cursor.execute(
+        "INSERT INTO portfolio_trades (user_id, ticker, action, price, shares) VALUES (?, ?, ?, ?, ?)",
+        (user_id, ticker, action, price, shares)
+    )
+    conn.commit()
+    trade_id = cursor.lastrowid
+    conn.close()
+    return {"error": False, "trade_id": trade_id, "message": f"{action} {shares} shares of {ticker} at ${price:.2f}"}
+
+
+def get_portfolio(user_id: int) -> list:
+    """Get current holdings for a user (net shares per ticker)."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT ticker,
+               SUM(CASE WHEN action='BUY' THEN shares ELSE -shares END) as net_shares,
+               SUM(CASE WHEN action='BUY' THEN price*shares ELSE -price*shares END) as net_cost
+        FROM portfolio_trades WHERE user_id=?
+        GROUP BY ticker
+        HAVING net_shares > 0.0001
+    """, (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_trade_history(user_id: int, limit: int = 50) -> list:
+    """Get trade history for a user."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, ticker, action, price, shares, timestamp FROM portfolio_trades WHERE user_id=? ORDER BY timestamp DESC LIMIT ?",
+        (user_id, limit)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_prediction_history(ticker: str) -> list:
+    """Get detailed prediction history for a ticker (resolved + pending)."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, predicted_direction, confidence, price_at_prediction,
+               actual_direction, was_correct, price_at_resolution,
+               created_at, resolved_at
+        FROM prediction_logs
+        WHERE ticker=?
+        ORDER BY created_at DESC
+        LIMIT 100
+    """, (ticker.upper(),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # Initialize database on import

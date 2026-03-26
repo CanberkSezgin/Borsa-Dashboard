@@ -30,6 +30,7 @@ class DS {
   static const emeraldSoft = Color(0xFF064E3B);   // Dark emerald tint
   static const crimson = Color(0xFFEF4444);
   static const crimsonSoft = Color(0xFF7F1D1D);   // Dark crimson tint
+  static const amber = Color(0xFFFBBF24);          // Warning / neutral amber
   static const neutral = Color(0xFF64748B);
   static const neutralSoft = Color(0xFF1E293B);
 
