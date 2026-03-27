@@ -10,7 +10,9 @@
 
 import math
 import uvicorn
+import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -31,8 +33,12 @@ from user_db import (
     log_prediction, get_prediction_stats,
     cache_news, get_cached_news,
     add_trade, get_portfolio, get_trade_history,
+    add_to_watchlist, remove_from_watchlist, get_watchlist,
+    add_alert, get_alerts, delete_alert,
+    get_all_active_alerts, trigger_alert,
 )
 from ab_tracker import log_ab_prediction, resolve_pending_predictions, get_model_performance
+from email_service import send_alert_email
 
 
 # ─────────────────────────────────────────────
@@ -51,8 +57,100 @@ async def lifespan(app: FastAPI):
     print("\n🚀 [STARTUP] Loading FinBERT model — please wait …")
     finbert_classifier = load_finbert_pipeline()
     print("🚀 [STARTUP] Model ready. Server is accepting requests.\n")
+
+    # ── Start background alert checker ──
+    import asyncio
+
+    async def _alert_worker():
+        """Background task: check price alerts every 60 seconds."""
+        import yfinance as yf
+        await asyncio.sleep(10)  # initial delay
+        while True:
+            try:
+                alerts = get_all_active_alerts()
+                if alerts:
+                    # Group by ticker to minimize API calls
+                    tickers = list(set(a["ticker"] for a in alerts))
+                    prices = {}
+                    for t in tickers:
+                        try:
+                            info = yf.Ticker(t).fast_info
+                            prices[t] = float(info.get("lastPrice", 0) or info.get("previousClose", 0))
+                        except Exception:
+                            pass
+
+                    for alert in alerts:
+                        t = alert["ticker"]
+                        live = prices.get(t, 0)
+                        if live <= 0:
+                            continue
+                        target = alert["target_price"]
+                        direction = alert["direction"]
+                        triggered = False
+                        if direction == "above" and live >= target:
+                            triggered = True
+                        elif direction == "below" and live <= target:
+                            triggered = True
+
+                        if triggered:
+                            trigger_alert(alert["id"])
+                            send_alert_email(
+                                to_email=alert["email"],
+                                username=alert["username"],
+                                ticker=t,
+                                direction=direction,
+                                target_price=target,
+                                live_price=live,
+                            )
+                            print(f"🔔 [ALERT] {t} hit ${live:.2f} (target: {direction} ${target:.2f}) → notified {alert['email']}")
+            except Exception as e:
+                print(f"[ALERT WORKER] Error: {e}")
+            await asyncio.sleep(60)
+
+    alert_task = asyncio.create_task(_alert_worker())
+    print("🔔 [STARTUP] Background alert checker started (60s interval).")
+
+    # ── Start live price streamer ──
+    async def _price_stream_worker():
+        import yfinance as yf
+        await asyncio.sleep(5)
+        watch_targets = [
+            {"symbol": "USD/TRY", "ticker": "TRY=X"},
+            {"symbol": "EUR/TRY", "ticker": "EURTRY=X"},
+            {"symbol": "GOLD (Ons)", "ticker": "GC=F"},
+            {"symbol": "BIST 100", "ticker": "XU100.IS"},
+            {"symbol": "AAPL", "ticker": "AAPL"},
+            {"symbol": "NVDA", "ticker": "NVDA"},
+            {"symbol": "TSLA", "ticker": "TSLA"},
+        ]
+        while True:
+            try:
+                if manager.active_connections:
+                    prices = {}
+                    for t in watch_targets:
+                        try:
+                            info = yf.Ticker(t["ticker"]).fast_info
+                            last = float(info.get("lastPrice", 0) or info.get("previousClose", 0))
+                            prev = float(info.get("previousClose", 0))
+                            prices[t["symbol"]] = {
+                                "price": round(last, 2),
+                                "prev_close": round(prev, 2)
+                            }
+                        except:
+                            pass
+                    await manager.broadcast({"type": "live_prices", "data": prices})
+            except Exception as e:
+                print(f"[LIVE PRICES] Error: {e}")
+            await asyncio.sleep(3)
+
+    price_task = asyncio.create_task(_price_stream_worker())
+    print("📈 [STARTUP] Live price streamer started (3s interval).")
+
     yield
-    # Cleanup on shutdown (nothing to do for now)
+
+    # Cleanup on shutdown
+    alert_task.cancel()
+    price_task.cancel()
     print("\n🛑 [SHUTDOWN] Server is shutting down.")
 
 
@@ -199,7 +297,8 @@ async def analyze_ticker(ticker: str, rows: int = 30, range: str = "1M"):
             {
                 "title": h.get("headline", ""),
                 "publisher": h.get("publisher", ""),
-                "link": h.get("link", "")
+                "link": h.get("link", ""),
+                "thumbnail": h.get("thumbnail", "")
             }
             for h in headlines[:5]
         ]
@@ -550,6 +649,64 @@ async def portfolio(user_id: int):
 
     return {"status": "success", "holdings": holdings}
 
+@app.get("/api/portfolio/summary/{user_id}")
+async def portfolio_summary(user_id: int):
+    """Generate an AI-powered markdown summary of the user's portfolio."""
+    from ai_service import generate_portfolio_summary
+    from sentiment_analysis import get_real_headlines
+    import yfinance as yf
+    import asyncio
+    
+    holdings = get_portfolio(user_id)
+    if not holdings:
+        return {"status": "success", "summary": "Portföyünüzde henüz hisse senedi bulunmuyor. Birkaç işlem yaparak yapay zeka analizi oluşturabilirsiniz."}
+    
+    portfolio_items = []
+    total_value = 0.0
+    
+    for h in holdings:
+        try:
+            t_obj = yf.Ticker(h["ticker"])
+            live_price = float(t_obj.fast_info.get("lastPrice", 0) or t_obj.fast_info.get("previousClose", 0))
+            if live_price == 0:
+                continue
+            shares = h["net_shares"]
+            cost = h["net_cost"]
+            avg_price = cost / shares if shares > 0 else 0.0
+            unrealized_pl = (live_price * shares) - cost
+            
+            portfolio_items.append({
+                "ticker": h["ticker"],
+                "shares": shares,
+                "avg_price": avg_price,
+                "unrealized_pl": unrealized_pl
+            })
+            total_value += (live_price * shares)
+        except Exception:
+            pass
+
+    portfolio_items.sort(key=lambda x: x["shares"] * x["avg_price"], reverse=True)
+    top_tickers = [item["ticker"] for item in portfolio_items[:3]]
+    recent_news = []
+    
+    for t in top_tickers:
+        try:
+            headlines = get_real_headlines(t)
+            recent_news.extend(headlines[:2])
+        except Exception:
+            pass
+
+    summary = await asyncio.to_thread(
+        generate_portfolio_summary, 
+        username=f"Kullanıcı", 
+        portfolio_items=portfolio_items, 
+        total_value=total_value, 
+        recent_news=recent_news
+    )
+
+    return {"status": "success", "summary": summary}
+
+
 
 @app.get("/api/portfolio/{user_id}/history")
 async def portfolio_history(user_id: int):
@@ -559,11 +716,170 @@ async def portfolio_history(user_id: int):
 
 
 # ─────────────────────────────────────────────
+#  WATCHLIST
+# ─────────────────────────────────────────────
+@app.post("/api/watchlist")
+async def add_watchlist(body: dict = None):
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    token = body.get("token", "")
+    user = get_user_from_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+    ticker = body.get("ticker", "").upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="Ticker required.")
+    added = add_to_watchlist(user["id"], ticker)
+    return {"status": "success", "added": added}
+
+
+@app.delete("/api/watchlist")
+async def del_watchlist(body: dict = None):
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    token = body.get("token", "")
+    user = get_user_from_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+    ticker = body.get("ticker", "").upper()
+    removed = remove_from_watchlist(user["id"], ticker)
+    return {"status": "success", "removed": removed}
+
+
+@app.get("/api/watchlist/{user_id}")
+async def watchlist(user_id: int):
+    """Get watchlist with mini price data for each ticker."""
+    items = get_watchlist(user_id)
+    import yfinance as yf
+    for item in items:
+        try:
+            t = yf.Ticker(item["ticker"])
+            hist = t.history(period="5d")
+            if not hist.empty:
+                prices = hist["Close"].tolist()
+                item["sparkline"] = [round(p, 2) for p in prices]
+                item["price"] = round(prices[-1], 2)
+                item["change_pct"] = round((prices[-1] - prices[0]) / prices[0] * 100, 1) if prices[0] > 0 else 0
+            else:
+                item["sparkline"] = []
+                item["price"] = 0
+                item["change_pct"] = 0
+        except Exception:
+            item["sparkline"] = []
+            item["price"] = 0
+            item["change_pct"] = 0
+    return {"status": "success", "watchlist": items}
+
+
+# ─────────────────────────────────────────────
+#  PRICE ALERTS
+# ─────────────────────────────────────────────
+@app.post("/api/alerts")
+async def create_alert(body: dict = None):
+    if body is None:
+        raise HTTPException(status_code=400, detail="Request body required")
+    token = body.get("token", "")
+    user = get_user_from_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+    ticker = body.get("ticker", "").upper()
+    target_price = body.get("target_price", 0)
+    direction = body.get("direction", "above")
+    if not ticker or target_price <= 0:
+        raise HTTPException(status_code=400, detail="Invalid alert parameters.")
+    alert_id = add_alert(user["id"], ticker, target_price, direction)
+    return {"status": "success", "alert_id": alert_id, "message": f"Alert set: {ticker} {direction} ${target_price}"}
+
+
+@app.get("/api/alerts/{user_id}")
+async def list_alerts(user_id: int):
+    alerts = get_alerts(user_id)
+    return {"status": "success", "alerts": alerts}
+
+
+@app.delete("/api/alerts/{alert_id}")
+async def remove_alert(alert_id: int):
+    removed = delete_alert(alert_id)
+    return {"status": "success", "removed": removed}
+
+
+# ─────────────────────────────────────────────
+#  STOCK LOGO PROXY (bypass CORS for Flutter web)
+# ─────────────────────────────────────────────
+_LOGO_DOMAINS = {
+    "AAPL": "apple.com", "MSFT": "microsoft.com", "GOOGL": "google.com", "GOOG": "google.com",
+    "AMZN": "amazon.com", "META": "meta.com", "TSLA": "tesla.com", "NVDA": "nvidia.com",
+    "NFLX": "netflix.com", "DIS": "disney.com", "INTC": "intel.com", "AMD": "amd.com",
+    "PYPL": "paypal.com", "ADBE": "adobe.com", "CRM": "salesforce.com", "ORCL": "oracle.com",
+    "CSCO": "cisco.com", "IBM": "ibm.com", "UBER": "uber.com", "LYFT": "lyft.com",
+    "SNAP": "snap.com", "SHOP": "shopify.com", "ZM": "zoom.us", "SPOT": "spotify.com",
+    "BA": "boeing.com", "JPM": "jpmorganchase.com", "V": "visa.com", "MA": "mastercard.com",
+    "WMT": "walmart.com", "KO": "coca-cola.com", "PEP": "pepsico.com", "NKE": "nike.com",
+    "SBUX": "starbucks.com", "MCD": "mcdonalds.com",
+}
+
+@app.get("/api/logo/{ticker}")
+async def get_logo(ticker: str):
+    """Proxy stock company logo to bypass CORS in Flutter web."""
+    ticker = ticker.upper()
+    domain = _LOGO_DOMAINS.get(ticker, f"{ticker.lower()}.com")
+    url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                return Response(
+                    content=resp.content,
+                    media_type=resp.headers.get("content-type", "image/png"),
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+    except Exception:
+        pass
+    raise HTTPException(status_code=404, detail="Logo not found")
+
+
+# ─────────────────────────────────────────────
 #  WEBSOCKET LIVE DATA
 # ─────────────────────────────────────────────
 from starlette.websockets import WebSocket, WebSocketDisconnect
 import asyncio
 import json as json_lib
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        dead_connections = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(json_lib.dumps(message))
+            except:
+                dead_connections.append(connection)
+        for dc in dead_connections:
+            self.disconnect(dc)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/live-prices")
+async def live_prices_endpoint(websocket: WebSocket):
+    """Real-time lightweight price streaming endpoint for the dashboard."""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection open, client might send specific tickers to watch later
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 
 @app.websocket("/ws/{ticker}")
 async def websocket_endpoint(websocket: WebSocket, ticker: str):

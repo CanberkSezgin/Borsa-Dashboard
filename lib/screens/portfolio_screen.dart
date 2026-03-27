@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../design_tokens.dart';
 
 // ─────────────────────────────────────────────────────────────────
@@ -28,9 +30,13 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   List<Map<String, dynamic>> _holdings = [];
   List<Map<String, dynamic>> _history = [];
   bool _loading = true;
+  bool _showAllHistory = false;
   double _cashBalance = _startingCash;
   double _totalInvested = 0;
   double _totalCurrentValue = 0;
+
+  String? _aiSummary;
+  bool _aiLoading = false;
 
   String t(String key) {
     const tr = {
@@ -120,6 +126,24 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _fetchAiSummary() async {
+    setState(() => _aiLoading = true);
+    final userId = widget.user['id'];
+    try {
+      final res = await http.get(
+        Uri.parse('${DS.baseUrl}/api/portfolio/summary/$userId'),
+      ).timeout(const Duration(seconds: 45));
+      if (res.statusCode == 200 && mounted) {
+        final body = jsonDecode(res.body);
+        setState(() => _aiSummary = body['summary']);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _aiSummary = 'Yapay zeka analizine ulaşılırken bir hata oluştu: $e');
+    } finally {
+      if (mounted) setState(() => _aiLoading = false);
+    }
   }
 
   Future<void> _sellHolding(String ticker, double shares, double price) async {
@@ -354,7 +378,24 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 20),
+
+                              // ── Asset Allocation Pie Chart ──
+                              if (_holdings.isNotEmpty) ...[
+                                _AssetPieChart(
+                                  holdings: _holdings,
+                                  cashBalance: _cashBalance,
+                                  portfolioValue: _portfolioValue,
+                                  lang: widget.lang,
+                                ),
+                                const SizedBox(height: 24),
+                              ],
+
+                              // ── AI Portfolio Summary ──
+                              if (_holdings.isNotEmpty) ...[
+                                _buildAiSummarySection(),
+                                const SizedBox(height: 24),
+                              ],
 
                               // ── Holdings ──
                               Text(t('holdings').toUpperCase(),
@@ -411,7 +452,36 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                                     style: const TextStyle(color: DS.textSecondary, fontSize: 13))),
                                 )
                               else
-                                ..._history.map((trade) => _TradeRow(trade: trade)),
+                                ..._history.take(_showAllHistory ? _history.length : 5).map((trade) => _TradeRow(trade: trade)),
+
+                              if (_history.length > 5 && !_showAllHistory)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Center(
+                                    child: TextButton.icon(
+                                      onPressed: () => setState(() => _showAllHistory = true),
+                                      icon: const Icon(Icons.expand_more_rounded, size: 16, color: DS.indigo),
+                                      label: Text(
+                                        widget.lang == 'tr' ? 'Daha fazla goster (${_history.length - 5})' : 'Show more (${_history.length - 5})',
+                                        style: const TextStyle(color: DS.indigo, fontSize: 12, fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (_showAllHistory && _history.length > 5)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Center(
+                                    child: TextButton.icon(
+                                      onPressed: () => setState(() => _showAllHistory = false),
+                                      icon: const Icon(Icons.expand_less_rounded, size: 16, color: DS.textMuted),
+                                      label: Text(
+                                        widget.lang == 'tr' ? 'Daha az goster' : 'Show less',
+                                        style: const TextStyle(color: DS.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ),
+                                ),
 
                               const SizedBox(height: 40),
                             ],
@@ -426,6 +496,125 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       ),
     );
   }
+
+  Widget _buildAiSummarySection() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: DS.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: DS.indigo.withValues(alpha: 0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: DS.indigo.withValues(alpha: 0.1),
+            blurRadius: 20,
+            spreadRadius: -5,
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: DS.indigo.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.auto_awesome, color: DS.indigo, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  widget.lang == 'tr' ? 'Akıllı Portföy Bülteni' : 'AI Executive Brief',
+                  style: const TextStyle(color: DS.textPrimary, fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+              ),
+              if (_aiLoading)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo),
+                )
+              else if (_aiSummary != null)
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: DS.textSecondary, size: 20),
+                  onPressed: _fetchAiSummary,
+                  constraints: const BoxConstraints(),
+                  padding: EdgeInsets.zero,
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_aiSummary == null && !_aiLoading)
+            Center(
+              child: ElevatedButton.icon(
+                onPressed: _fetchAiSummary,
+                icon: const Icon(Icons.analytics_rounded, size: 18),
+                label: Text(widget.lang == 'tr' ? 'Yapay Zeka Raporu Oluştur' : 'Generate AI Report'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: DS.indigo,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+              ),
+            )
+          else if (_aiSummary != null && !_aiLoading)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: DS.bg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: DS.surfaceBorder.withValues(alpha: 0.2)),
+              ),
+              child: MarkdownBody(
+                data: _aiSummary!,
+                styleSheet: MarkdownStyleSheet(
+                  p: const TextStyle(color: DS.textSecondary, fontSize: 14, height: 1.5),
+                  strong: const TextStyle(color: DS.textPrimary, fontWeight: FontWeight.bold),
+                  listBullet: const TextStyle(color: DS.indigo),
+                ),
+              ),
+            )
+          else if (_aiLoading)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Text(
+                      widget.lang == 'tr' ? 'Portföyünüz analiz ediliyor...' : 'Analyzing your portfolio...',
+                      style: const TextStyle(color: DS.textMuted, fontSize: 13, fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Ticker → Company Domain Mapper ───
+String _getCompanyDomain(String ticker) {
+  const map = {
+    'AAPL': 'apple.com', 'MSFT': 'microsoft.com', 'GOOGL': 'google.com', 'GOOG': 'google.com',
+    'AMZN': 'amazon.com', 'META': 'meta.com', 'TSLA': 'tesla.com', 'NVDA': 'nvidia.com',
+    'NFLX': 'netflix.com', 'DIS': 'disney.com', 'INTC': 'intel.com', 'AMD': 'amd.com',
+    'PYPL': 'paypal.com', 'ADBE': 'adobe.com', 'CRM': 'salesforce.com', 'ORCL': 'oracle.com',
+    'CSCO': 'cisco.com', 'IBM': 'ibm.com', 'UBER': 'uber.com', 'LYFT': 'lyft.com',
+    'SNAP': 'snap.com', 'PINS': 'pinterest.com', 'SQ': 'squareup.com', 'SHOP': 'shopify.com',
+    'ZM': 'zoom.us', 'SPOT': 'spotify.com', 'BA': 'boeing.com', 'JPM': 'jpmorganchase.com',
+    'V': 'visa.com', 'MA': 'mastercard.com', 'WMT': 'walmart.com', 'KO': 'coca-cola.com',
+    'PEP': 'pepsico.com', 'NKE': 'nike.com', 'SBUX': 'starbucks.com', 'MCD': 'mcdonalds.com',
+  };
+  return map[ticker.toUpperCase()] ?? '${ticker.toLowerCase()}.com';
 }
 
 // ─── Balance Stat Widget ───
@@ -488,15 +677,27 @@ class _HoldingCard extends StatelessWidget {
               Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [DS.indigoSoft, DS.surface],
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  ),
                   borderRadius: BorderRadius.circular(12),
+                  color: DS.surfaceAlt,
                 ),
-                alignment: Alignment.center,
-                child: Text(ticker.length >= 2 ? ticker.substring(0, 2) : ticker,
-                  style: const TextStyle(color: DS.indigo, fontWeight: FontWeight.w900, fontSize: 16)),
+                clipBehavior: Clip.antiAlias,
+                child: Image.network(
+                  '${DS.baseUrl}/api/logo/$ticker',
+                  width: 44, height: 44, fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [DS.indigoSoft, DS.surface],
+                        begin: Alignment.topLeft, end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(ticker.length >= 2 ? ticker.substring(0, 2) : ticker,
+                      style: const TextStyle(color: DS.indigo, fontWeight: FontWeight.w900, fontSize: 16)),
+                  ),
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -551,7 +752,7 @@ class _HoldingCard extends StatelessWidget {
             child: ElevatedButton.icon(
               onPressed: onSell,
               icon: const Icon(Icons.sell_rounded, size: 14),
-              label: Text('${t('sellNow')} (${netShares.toStringAsFixed(0)} ${t('shares')})',
+              label: Text(t('sellNow'),
                 style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 0.5)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: DS.crimson.withValues(alpha: 0.15),
@@ -644,6 +845,95 @@ class _TradeRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Asset Allocation Pie Chart ───
+class _AssetPieChart extends StatelessWidget {
+  final List<Map<String, dynamic>> holdings;
+  final double cashBalance;
+  final double portfolioValue;
+  final String lang;
+
+  const _AssetPieChart({
+    required this.holdings,
+    required this.cashBalance,
+    required this.portfolioValue,
+    required this.lang,
+  });
+
+  static const List<Color> _sliceColors = [
+    DS.indigo, DS.emerald, DS.amber, DS.crimson,
+    Color(0xFF8B5CF6), Color(0xFFEC4899), Color(0xFF06B6D4), Color(0xFFF97316),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (portfolioValue <= 0) return const SizedBox.shrink();
+
+    final sections = <PieChartSectionData>[];
+    final legends = <MapEntry<String, Color>>[];
+
+    final cashPct = (cashBalance / portfolioValue * 100);
+    if (cashPct > 0) {
+      sections.add(PieChartSectionData(
+        value: cashBalance, color: DS.textMuted.withValues(alpha: 0.4), radius: 28,
+        title: '${cashPct.toStringAsFixed(0)}%',
+        titleStyle: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+      ));
+      legends.add(MapEntry(lang == 'tr' ? 'Nakit' : 'Cash', DS.textMuted.withValues(alpha: 0.4)));
+    }
+
+    for (int i = 0; i < holdings.length; i++) {
+      final h = holdings[i];
+      final ticker = h['ticker'] as String? ?? '?';
+      final value = (h['current_value'] as num?)?.toDouble() ?? 0;
+      final pct = (value / portfolioValue * 100);
+      if (pct <= 0) continue;
+      final color = _sliceColors[i % _sliceColors.length];
+      sections.add(PieChartSectionData(
+        value: value, color: color, radius: 28,
+        title: '${pct.toStringAsFixed(0)}%',
+        titleStyle: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+      ));
+      legends.add(MapEntry(ticker, color));
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: DS.surface, borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: DS.surfaceBorder.withValues(alpha: 0.3)),
+      ),
+      child: Column(children: [
+        Text(lang == 'tr' ? 'VARLIK DAGILIMI' : 'ASSET ALLOCATION',
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: DS.textMuted, letterSpacing: 1.5)),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 140,
+          child: Stack(alignment: Alignment.center, children: [
+            PieChart(PieChartData(
+              sections: sections, centerSpaceRadius: 40, sectionsSpace: 2,
+              borderData: FlBorderData(show: false),
+            )),
+            Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('\$${portfolioValue.toStringAsFixed(0)}',
+                style: const TextStyle(color: DS.textPrimary, fontSize: 16, fontWeight: FontWeight.w900)),
+              Text(lang == 'tr' ? 'Toplam' : 'Total',
+                style: const TextStyle(color: DS.textMuted, fontSize: 9, fontWeight: FontWeight.w600)),
+            ]),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        Wrap(spacing: 16, runSpacing: 6,
+          children: legends.map((e) => Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 10, height: 10, decoration: BoxDecoration(color: e.value, borderRadius: BorderRadius.circular(3))),
+            const SizedBox(width: 6),
+            Text(e.key, style: const TextStyle(color: DS.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
+          ])).toList(),
+        ),
+      ]),
     );
   }
 }

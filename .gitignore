@@ -1,3 +1,15 @@
+# Security & Database
+.env
+*.db
+user_data.db
+users.db
+borsa.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
 # Miscellaneous
 *.class
 *.log

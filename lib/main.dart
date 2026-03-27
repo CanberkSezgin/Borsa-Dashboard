@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'design_tokens.dart';
 import 'screens/login_screen.dart';
@@ -20,7 +21,7 @@ import 'screens/portfolio_screen.dart';
 const Map<String, Map<String, String>> _l10n = {
   'en': {
     'appTitle': 'Borsa Dashboard',
-    'searchHint': 'Enter ticker (e.g. AAPL)',
+    'searchHint': 'Enter ticker symbol',
     'analyzeBtn': 'Analyze',
     'loading': 'Fetching data…',
     'errorPrefix': 'Error',
@@ -50,7 +51,7 @@ const Map<String, Map<String, String>> _l10n = {
   },
   'tr': {
     'appTitle': 'Borsa Paneli',
-    'searchHint': 'Sembol girin (örn. AAPL)',
+    'searchHint': 'Hisse sembolu girin',
     'analyzeBtn': 'Analiz Et',
     'loading': 'Veri alınıyor…',
     'errorPrefix': 'Hata',
@@ -97,7 +98,8 @@ String _getGreeting(String lang) {
 // ─────────────────────────────────────────────────────────────────
 class _MarketMarquee extends StatefulWidget {
   final List<dynamic> items;
-  const _MarketMarquee({required this.items});
+  final Map<String, dynamic> livePrices;
+  const _MarketMarquee({required this.items, required this.livePrices});
 
   @override
   State<_MarketMarquee> createState() => _MarketMarqueeState();
@@ -151,8 +153,15 @@ class _MarketMarqueeState extends State<_MarketMarquee> {
         itemBuilder: (context, index) {
           final item = widget.items[index % widget.items.length];
           final symbol = item['symbol'] as String;
-          final price = (item['price'] as num).toDouble();
-          final change = (item['change_pct'] as num).toDouble();
+          final live = widget.livePrices[symbol];
+          
+          final price = live != null ? (live['price'] as num).toDouble() : (item['price'] as num).toDouble();
+          
+          double change = (item['change_pct'] as num).toDouble();
+          if (live != null && live['prev_close'] != null && live['prev_close'] > 0) {
+             change = (price - (live['prev_close'] as num).toDouble()) / (live['prev_close'] as num).toDouble() * 100;
+          }
+          
           final isPositive = change >= 0;
           final color = isPositive ? DS.emerald : DS.crimson;
           final arrow = isPositive ? '▲' : '▼';
@@ -161,7 +170,10 @@ class _MarketMarqueeState extends State<_MarketMarquee> {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Text(symbol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: DS.textMuted)),
               const SizedBox(width: 8),
-              Text(price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: DS.textPrimary)),
+              if (live != null)
+                Text(price.toStringAsFixed(2), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: color))
+              else
+                Text(price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: DS.textPrimary)),
               const SizedBox(width: 6),
               Text('$arrow ${change.abs().toStringAsFixed(2)}%', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: color)),
               const SizedBox(width: 16),
@@ -341,6 +353,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _modelStats;
   Map<String, dynamic>? _multiTimeframe;
 
+  // Watchlist
+  List<Map<String, dynamic>> _watchlist = [];
+  bool _watchlistLoading = false;
+
+  WebSocketChannel? _channel;
+  Map<String, dynamic> _livePrices = {};
+
   Timer? _refreshTimer;
   DateTime? _lastFetchTime;
 
@@ -350,6 +369,32 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _fetchMarketSummary();
+    _fetchWatchlist();
+    _initWebSocket();
+  }
+
+  void _initWebSocket() {
+    final wsUrl = DS.baseUrl.replaceFirst('http', 'ws') + '/ws/live-prices';
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _channel!.stream.listen((message) {
+        final payload = jsonDecode(message);
+        if (payload['type'] == 'live_prices' && mounted) {
+          setState(() {
+             // Merging new live prices so we don't drop ones not updating
+             payload['data'].forEach((k, v) => _livePrices[k] = v);
+          });
+        }
+      }, onError: (_) => print('[WS] Error disconnected'), onDone: () => print('[WS] Done'));
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _tickerCtrl.dispose();
+    _refreshTimer?.cancel();
+    _channel?.sink.close();
+    super.dispose();
   }
 
   Future<void> _fetchMarketSummary() async {
@@ -365,12 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  @override
-  void dispose() {
-    _refreshTimer?.cancel();
-    _tickerCtrl.dispose();
-    super.dispose();
-  }
+
 
   Future<void> _analyze({bool isAutoRefresh = false}) async {
     final ticker = _tickerCtrl.text.trim().toUpperCase();
@@ -436,14 +476,241 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  Future<void> _executeTrade(String action) async {
+  Future<void> _fetchWatchlist() async {
+    final userId = widget.user['id'];
+    if (userId == null) return;
+    setState(() => _watchlistLoading = true);
+    try {
+      final uri = Uri.parse('${DS.baseUrl}/api/watchlist/$userId');
+      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200 && mounted) {
+        final body = jsonDecode(res.body);
+        final items = (body['watchlist'] as List<dynamic>?) ?? [];
+        setState(() => _watchlist = items.map((e) => e as Map<String, dynamic>).toList());
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _watchlistLoading = false);
+  }
+
+  Future<void> _toggleWatchlist(String ticker) async {
+    final isInList = _watchlist.any((w) => w['ticker'] == ticker.toUpperCase());
+    try {
+      if (isInList) {
+        await http.delete(
+          Uri.parse('${DS.baseUrl}/api/watchlist'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'token': widget.token, 'ticker': ticker}),
+        );
+      } else {
+        await http.post(
+          Uri.parse('${DS.baseUrl}/api/watchlist'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'token': widget.token, 'ticker': ticker}),
+        );
+      }
+      _fetchWatchlist();
+    } catch (_) {}
+  }
+
+  void _showAlertDialog() {
+    final ticker = _tickerCtrl.text.trim().toUpperCase();
+    if (ticker.isEmpty || _data == null) return;
+    final currentPrice = (_data!['Close'] as num?)?.toDouble() ?? 0;
+    final priceCtrl = TextEditingController();
+    String direction = 'above';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (context, setDlg) {
+        return AlertDialog(
+          backgroundColor: DS.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: DS.surfaceBorder.withValues(alpha: 0.5))),
+          title: Row(children: [
+            const Icon(Icons.notifications_active_rounded, color: DS.amber, size: 22),
+            const SizedBox(width: 8),
+            Text('$ticker ${widget.lang == 'tr' ? 'Fiyat Alarmi' : 'Price Alert'}',
+              style: const TextStyle(color: DS.textPrimary, fontWeight: FontWeight.w800, fontSize: 16)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('${widget.lang == 'tr' ? 'Mevcut fiyat' : 'Current price'}: \$${currentPrice.toStringAsFixed(2)}',
+              style: const TextStyle(color: DS.textSecondary, fontSize: 13)),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setDlg(() => direction = 'above'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: direction == 'above' ? DS.emerald.withValues(alpha: 0.15) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: direction == 'above' ? DS.emerald : DS.surfaceBorder),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(widget.lang == 'tr' ? 'Ustunde' : 'Above',
+                      style: TextStyle(color: direction == 'above' ? DS.emerald : DS.textMuted, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setDlg(() => direction = 'below'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: direction == 'below' ? DS.crimson.withValues(alpha: 0.15) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: direction == 'below' ? DS.crimson : DS.surfaceBorder),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(widget.lang == 'tr' ? 'Altinda' : 'Below',
+                      style: TextStyle(color: direction == 'below' ? DS.crimson : DS.textMuted, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 16),
+            TextField(
+              controller: priceCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: DS.textPrimary, fontSize: 18, fontWeight: FontWeight.w700),
+              decoration: InputDecoration(
+                prefixText: '\$ ',
+                prefixStyle: const TextStyle(color: DS.textMuted, fontSize: 18),
+                hintText: widget.lang == 'tr' ? 'Hedef fiyat' : 'Target price',
+                hintStyle: const TextStyle(color: DS.textMuted),
+                filled: true,
+                fillColor: DS.bg,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(widget.lang == 'tr' ? 'Iptal' : 'Cancel', style: const TextStyle(color: DS.textSecondary)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final targetPrice = double.tryParse(priceCtrl.text.trim());
+                if (targetPrice == null || targetPrice <= 0) return;
+                Navigator.pop(ctx);
+                try {
+                  await http.post(
+                    Uri.parse('${DS.baseUrl}/api/alerts'),
+                    headers: {'Content-Type': 'application/json'},
+                    body: jsonEncode({
+                      'token': widget.token,
+                      'ticker': ticker,
+                      'target_price': targetPrice,
+                      'direction': direction,
+                    }),
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('${widget.lang == 'tr' ? 'Alarm kuruldu' : 'Alert set'}: $ticker ${direction == 'above' ? '>' : '<'} \$${targetPrice.toStringAsFixed(2)}'),
+                      backgroundColor: DS.indigo,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ));
+                  }
+                } catch (_) {}
+              },
+              icon: const Icon(Icons.notifications_active_rounded, size: 16),
+              label: Text(widget.lang == 'tr' ? 'Alarm Kur' : 'Set Alert'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: DS.amber, foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  void _showBuyDialog() {
+    final ticker = _tickerCtrl.text.trim().toUpperCase();
+    if (ticker.isEmpty || _data == null) return;
+    final live = _livePrices[ticker];
+    final price = live != null ? (live['price'] as num).toDouble() : ((_data!['Close'] as num?)?.toDouble() ?? 0);
+    if (price <= 0) return;
+    int buyQuantity = 1;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlg) => AlertDialog(
+          backgroundColor: DS.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: DS.emerald.withValues(alpha: 0.3))),
+          title: Row(children: [
+            Icon(Icons.shopping_cart_rounded, color: DS.emerald, size: 20),
+            const SizedBox(width: 8),
+            Text('${widget.lang == 'tr' ? 'Satin Al' : 'Buy'} $ticker',
+              style: const TextStyle(color: DS.textPrimary, fontWeight: FontWeight.w800, fontSize: 16)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('${widget.lang == 'tr' ? 'Fiyat' : 'Price'}: \$${price.toStringAsFixed(2)}',
+              style: const TextStyle(color: DS.textSecondary, fontSize: 13)),
+            const SizedBox(height: 20),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline, color: DS.crimson),
+                onPressed: buyQuantity > 1 ? () => setDlg(() => buyQuantity--) : null,
+              ),
+              const SizedBox(width: 16),
+              Text('$buyQuantity', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: DS.textPrimary)),
+              const SizedBox(width: 16),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline, color: DS.emerald),
+                onPressed: () => setDlg(() => buyQuantity++),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              decoration: BoxDecoration(color: DS.emerald.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
+              child: Text(
+                '${widget.lang == 'tr' ? 'Toplam Maliyet' : 'Total Cost'}: \$${(buyQuantity * price).toStringAsFixed(2)}',
+                style: const TextStyle(color: DS.emerald, fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(widget.lang == 'tr' ? 'Iptal' : 'Cancel', style: const TextStyle(color: DS.textSecondary)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _executeTrade('BUY', shares: buyQuantity);
+              },
+              icon: const Icon(Icons.arrow_downward_rounded, size: 14),
+              label: Text(widget.lang == 'tr' ? 'AL' : 'BUY', style: const TextStyle(fontWeight: FontWeight.w800)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: DS.emerald, foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _executeTrade(String action, {int shares = 1}) async {
     final ticker = _tickerCtrl.text.trim().toUpperCase();
     if (ticker.isEmpty || _data == null) return;
 
-    final price = (_data!['Close'] as num?)?.toDouble() ?? 0;
+    final live = _livePrices[ticker];
+    final price = live != null ? (live['price'] as num).toDouble() : ((_data!['Close'] as num?)?.toDouble() ?? 0);
     if (price <= 0) return;
 
-    // Default 1 share per trade
+    // Use specified share count
     try {
       final uri = Uri.parse('${DS.baseUrl}/api/portfolio/trade');
       final response = await http.post(
@@ -454,7 +721,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'ticker': ticker,
           'action': action,
           'price': price,
-          'shares': 1,
+          'shares': shares,
         }),
       ).timeout(const Duration(seconds: 10));
 
@@ -541,7 +808,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // ── App Bar with Profile ──
             _buildAppBar(avatarId, username),
             if (_marketSummary.isNotEmpty)
-              _MarketMarquee(items: _marketSummary),
+              _MarketMarquee(items: _marketSummary, livePrices: _livePrices),
             Expanded(
               child: Center(
                 child: ConstrainedBox(
@@ -555,7 +822,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         Padding(
                           padding: const EdgeInsets.only(bottom: 24),
                           child: Text(
-                            '${_getGreeting(widget.lang)}, $username 👋',
+                            '${_getGreeting(widget.lang)}, $username',
                             style: const TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.w800,
@@ -571,7 +838,20 @@ class _HomeScreenState extends State<HomeScreen> {
                           onSearch: _analyze,
                           loading: _loading,
                         ),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 16),
+
+                        // ── WATCHLIST BAR ──
+                        if (_watchlist.isNotEmpty)
+                          _WatchlistBar(
+                            items: _watchlist,
+                            lang: widget.lang,
+                            onTap: (ticker) {
+                              _tickerCtrl.text = ticker;
+                              _analyze();
+                            },
+                            onRemove: (ticker) => _toggleWatchlist(ticker),
+                          ),
+                        const SizedBox(height: 16),
 
                         if (_loading) ...[
                           _PremiumCard(
@@ -625,7 +905,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: SizedBox(
                                     height: 44,
                                     child: ElevatedButton.icon(
-                                      onPressed: () => _executeTrade('BUY'),
+                                      onPressed: () => _showBuyDialog(),
                                       icon: const Icon(Icons.arrow_downward_rounded, size: 16),
                                       label: Text(widget.lang == 'tr' ? 'AL' : 'BUY',
                                         style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1)),
@@ -657,6 +937,41 @@ class _HomeScreenState extends State<HomeScreen> {
                               ],
                             ),
                             const SizedBox(height: 16),
+                            // ── Star + Alert ──
+                            Row(children: [
+                              Expanded(
+                                child: SizedBox(height: 38,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => _toggleWatchlist(_tickerCtrl.text.trim()),
+                                    icon: Icon(
+                                      _watchlist.any((w) => w['ticker'] == _tickerCtrl.text.trim().toUpperCase())
+                                        ? Icons.star_rounded : Icons.star_border_rounded,
+                                      size: 18, color: DS.amber),
+                                    label: Text(
+                                      _watchlist.any((w) => w['ticker'] == _tickerCtrl.text.trim().toUpperCase())
+                                        ? (widget.lang == 'tr' ? 'Izlemede' : 'Watching')
+                                        : (widget.lang == 'tr' ? 'Izle' : 'Watch'),
+                                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: DS.amber)),
+                                    style: OutlinedButton.styleFrom(
+                                      side: BorderSide(color: DS.amber.withValues(alpha: 0.4)),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              SizedBox(height: 38, width: 38,
+                                child: OutlinedButton(
+                                  onPressed: _showAlertDialog,
+                                  style: OutlinedButton.styleFrom(
+                                    padding: EdgeInsets.zero,
+                                    side: BorderSide(color: DS.surfaceBorder.withValues(alpha: 0.4)),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  child: const Icon(Icons.notifications_active_outlined, size: 16, color: DS.amber),
+                                ),
+                              ),
+                            ]),
                           ],
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 500),
@@ -1301,10 +1616,24 @@ class _ProChartSection extends StatelessWidget {
                     }).toList();
                   },
                   touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (_) => DS.deepBlue.withValues(alpha: 0.8),
-                    getTooltipItems: (touchedSpots) => touchedSpots.map((spot) =>
-                      LineTooltipItem('\$${spot.y.toStringAsFixed(2)}',
-                        const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))).toList(),
+                    getTooltipColor: (_) => DS.deepBlue.withValues(alpha: 0.92),
+                    getTooltipItems: (touchedSpots) => touchedSpots.map((spot) {
+                      final idx = spot.spotIndex;
+                      if (idx < 0 || idx >= dataList.length) {
+                        return LineTooltipItem('\$${spot.y.toStringAsFixed(2)}',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13));
+                      }
+                      final point = dataList[idx];
+                      final rsi = (point['RSI'] as num?)?.toDouble();
+                      final macd = (point['MACD'] as num?)?.toDouble();
+                      final sentiment = (point['Sentiment_Score'] as num?)?.toDouble();
+                      final lines = ['\$${spot.y.toStringAsFixed(2)}'];
+                      if (rsi != null) lines.add('RSI: ${rsi.toStringAsFixed(1)}');
+                      if (macd != null) lines.add('MACD: ${macd.toStringAsFixed(3)}');
+                      if (sentiment != null) lines.add('Sent: ${sentiment.toStringAsFixed(3)}');
+                      return LineTooltipItem(lines.join('\n'),
+                        const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, height: 1.5));
+                    }).toList(),
                   ),
                 ),
               ),
@@ -1354,6 +1683,7 @@ class _RecentNewsSection extends StatelessWidget {
                 final title = item['title'] as String? ?? '';
                 final publisher = item['publisher'] as String? ?? '';
                 final link = item['link'] as String? ?? '';
+                final thumbnail = item['thumbnail'] as String? ?? '';
                 final initial = publisher.isNotEmpty ? publisher[0].toUpperCase() : 'N';
 
                 return Column(
@@ -1365,15 +1695,20 @@ class _RecentNewsSection extends StatelessWidget {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Container(
-                              width: 36, height: 36,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: DS.indigo.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(initial,
-                                style: const TextStyle(color: DS.indigo, fontSize: 14, fontWeight: FontWeight.w800)),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: thumbnail.isNotEmpty
+                                ? Image.network(thumbnail, width: 56, height: 56, fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      width: 56, height: 56, alignment: Alignment.center,
+                                      decoration: BoxDecoration(color: DS.indigo.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+                                      child: Text(initial, style: const TextStyle(color: DS.indigo, fontSize: 18, fontWeight: FontWeight.w800)),
+                                    ))
+                                : Container(
+                                    width: 56, height: 56, alignment: Alignment.center,
+                                    decoration: BoxDecoration(color: DS.indigo.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+                                    child: Text(initial, style: const TextStyle(color: DS.indigo, fontSize: 18, fontWeight: FontWeight.w800)),
+                                  ),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -1409,6 +1744,126 @@ class _RecentNewsSection extends StatelessWidget {
       ],
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  WATCHLIST BAR (horizontal scrolling sparklines)
+// ─────────────────────────────────────────────────────────────────
+class _WatchlistBar extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+  final String lang;
+  final ValueChanged<String> onTap;
+  final ValueChanged<String> onRemove;
+
+  const _WatchlistBar({required this.items, required this.lang, required this.onTap, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Text(
+            lang == 'tr' ? 'IZLEME LISTESI' : 'WATCHLIST',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: DS.textMuted, letterSpacing: 1.5),
+          ),
+        ),
+        SizedBox(
+          height: 90,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (_, i) {
+              final item = items[i];
+              final ticker = item['ticker'] as String? ?? '';
+              final price = (item['price'] as num?)?.toDouble() ?? 0;
+              final changePct = (item['change_pct'] as num?)?.toDouble() ?? 0;
+              final sparkline = (item['sparkline'] as List<dynamic>?) ?? [];
+              final isPositive = changePct >= 0;
+              final color = isPositive ? DS.emerald : DS.crimson;
+
+              return GestureDetector(
+                onTap: () => onTap(ticker),
+                child: Container(
+                  width: 140,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: DS.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: DS.surfaceBorder.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Text(ticker, style: const TextStyle(color: DS.textPrimary, fontSize: 13, fontWeight: FontWeight.w800)),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: () => onRemove(ticker),
+                          child: Icon(Icons.close_rounded, size: 14, color: DS.textMuted.withValues(alpha: 0.5)),
+                        ),
+                      ]),
+                      const SizedBox(height: 4),
+                      Row(children: [
+                        Text('\$${price.toStringAsFixed(2)}',
+                          style: const TextStyle(color: DS.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 6),
+                        Text('${isPositive ? '+' : ''}${changePct.toStringAsFixed(1)}%',
+                          style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800)),
+                      ]),
+                      const Spacer(),
+                      if (sparkline.length >= 2)
+                        SizedBox(
+                          height: 20,
+                          child: CustomPaint(
+                            size: const Size(double.infinity, 20),
+                            painter: _SparklinePainter(
+                              data: sparkline.map((e) => (e as num).toDouble()).toList(),
+                              color: color,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SparklinePainter extends CustomPainter {
+  final List<double> data;
+  final Color color;
+  _SparklinePainter({required this.data, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.length < 2) return;
+    final minVal = data.reduce((a, b) => a < b ? a : b);
+    final maxVal = data.reduce((a, b) => a > b ? a : b);
+    final range = maxVal - minVal;
+    if (range == 0) return;
+
+    final paint = Paint()..color = color..strokeWidth = 1.5..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
+    final path = Path();
+
+    for (int i = 0; i < data.length; i++) {
+      final x = (i / (data.length - 1)) * size.width;
+      final y = size.height - ((data[i] - minVal) / range) * size.height;
+      if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -1570,7 +2025,7 @@ class _MultiTimeframeCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  MODEL PERFORMANCE CARD (A/B Testing) — Tappable
+//  MODEL PERFORMANCE CARD (A/B Testing)
 // ─────────────────────────────────────────────────────────────────
 class _ModelPerformanceCard extends StatelessWidget {
   final Map<String, dynamic> stats;
@@ -1578,18 +2033,6 @@ class _ModelPerformanceCard extends StatelessWidget {
   final String ticker;
 
   const _ModelPerformanceCard({required this.stats, required this.lang, required this.ticker});
-
-  void _showHistory(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: DS.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => _PredictionHistorySheet(ticker: ticker, lang: lang),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1626,21 +2069,16 @@ class _ModelPerformanceCard extends StatelessWidget {
               Text('$totalResolved ${lang == 'tr' ? 'tahmin sonuclandi' : 'predictions resolved'}',
                 style: const TextStyle(color: DS.textMuted, fontSize: 12)),
               const SizedBox(height: 20),
-              GestureDetector(
-                onTap: () => _showHistory(context),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                  decoration: BoxDecoration(color: DS.surfaceAlt.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(12)),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                    _StatChip(label: lang == 'tr' ? 'Kazanc' : 'Wins', value: '$wins', color: DS.emerald),
-                    _StatChip(label: lang == 'tr' ? 'Kayip' : 'Losses', value: '$losses', color: DS.crimson),
-                    _StatChip(label: lang == 'tr' ? 'Bekleyen' : 'Pending', value: '$pending', color: DS.amber),
-                  ]),
-                ),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                decoration: BoxDecoration(color: DS.surfaceAlt.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(12)),
+                child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                  _StatChip(label: lang == 'tr' ? 'Kazanc' : 'Wins', value: '$wins', color: DS.emerald),
+                  _StatChip(label: lang == 'tr' ? 'Kayip' : 'Losses', value: '$losses', color: DS.crimson),
+                  _StatChip(label: lang == 'tr' ? 'Bekleyen' : 'Pending', value: '$pending', color: DS.amber),
+                ]),
               ),
-              const SizedBox(height: 8),
-              Text(lang == 'tr' ? 'Detaylar icin dokunun' : 'Tap for details',
-                style: const TextStyle(color: DS.textMuted, fontSize: 10, fontStyle: FontStyle.italic)),
+
             ]),
           ),
         ),

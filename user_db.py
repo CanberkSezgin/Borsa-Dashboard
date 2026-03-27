@@ -123,9 +123,21 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS price_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            target_price REAL NOT NULL,
+            direction TEXT NOT NULL,
+            is_triggered INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
-    print("[AUTH] ✅ Database initialized (users, predictions, news_cache, watchlist, portfolio).")
+    print("[AUTH] ✅ Database initialized (users, predictions, news_cache, watchlist, portfolio, alerts).")
 
 
 def _hash_password(password: str) -> str:
@@ -477,6 +489,106 @@ def get_prediction_history(ticker: str) -> list:
         ORDER BY created_at DESC
         LIMIT 100
     """, (ticker.upper(),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────
+#  WATCHLIST FUNCTIONS
+# ─────────────────────────────────────────────
+def add_to_watchlist(user_id: int, ticker: str) -> bool:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT OR IGNORE INTO watchlist (user_id, ticker) VALUES (?, ?)",
+                       (user_id, ticker.upper()))
+        conn.commit()
+        inserted = cursor.rowcount > 0
+    except Exception:
+        inserted = False
+    conn.close()
+    return inserted
+
+
+def remove_from_watchlist(user_id: int, ticker: str) -> bool:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM watchlist WHERE user_id=? AND ticker=?",
+                   (user_id, ticker.upper()))
+    conn.commit()
+    removed = cursor.rowcount > 0
+    conn.close()
+    return removed
+
+
+def get_watchlist(user_id: int) -> list:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT ticker, added_at FROM watchlist WHERE user_id=? ORDER BY added_at DESC",
+                   (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────
+#  PRICE ALERT FUNCTIONS
+# ─────────────────────────────────────────────
+def add_alert(user_id: int, ticker: str, target_price: float, direction: str) -> int:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO price_alerts (user_id, ticker, target_price, direction) VALUES (?, ?, ?, ?)",
+        (user_id, ticker.upper(), target_price, direction.lower())
+    )
+    conn.commit()
+    alert_id = cursor.lastrowid
+    conn.close()
+    return alert_id
+
+
+def get_alerts(user_id: int) -> list:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, ticker, target_price, direction, is_triggered, created_at FROM price_alerts WHERE user_id=? AND is_triggered=0 ORDER BY created_at DESC",
+        (user_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_alert(alert_id: int) -> bool:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM price_alerts WHERE id=?", (alert_id,))
+    conn.commit()
+    removed = cursor.rowcount > 0
+    conn.close()
+    return removed
+
+
+def trigger_alert(alert_id: int):
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE price_alerts SET is_triggered=1 WHERE id=?", (alert_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_all_active_alerts() -> list:
+    """Get ALL active (non-triggered) alerts with user details for the background checker."""
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT pa.id, pa.user_id, pa.ticker, pa.target_price, pa.direction,
+               u.email, u.username
+        FROM price_alerts pa
+        JOIN users u ON pa.user_id = u.id
+        WHERE pa.is_triggered = 0
+    """)
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]

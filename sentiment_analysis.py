@@ -112,12 +112,21 @@ def get_real_headlines(ticker: str) -> list[dict]:
                 
             provider = content.get("provider") or {}
             click_url = content.get("clickThroughUrl") or {}
-                
+
+            # Extract thumbnail
+            thumb_url = ""
+            thumb_obj = content.get("thumbnail") or {}
+            if isinstance(thumb_obj, dict):
+                resolutions = thumb_obj.get("resolutions") or []
+                if isinstance(resolutions, list) and len(resolutions) > 0:
+                    thumb_url = resolutions[0].get("url", "")
+
             headlines.append({
                 "date": pub_date,
                 "headline": title,
                 "publisher": provider.get("displayName", "") if isinstance(provider, dict) else "",
-                "link": click_url.get("url", "") if isinstance(click_url, dict) else ""
+                "link": click_url.get("url", "") if isinstance(click_url, dict) else "",
+                "thumbnail": thumb_url
             })
 
     # Fallback to company summary if no recent headlines
