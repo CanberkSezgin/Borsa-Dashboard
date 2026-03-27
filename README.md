@@ -1,63 +1,65 @@
 # Borsa Dashboard: AI-Powered Financial Terminal
 
-**Borsa Dashboard**, modern borsa yatırımcıları için tasarlanmış, **Hissedeki Yapay Zeka (AI)** ve **Derin Öğrenme (Deep Learning)** modellerini tek bir çatıda birleştiren profesyonel bir finans terminalidir.
+**Borsa Dashboard** is a professional financial terminal designed for modern stock market investors, combining **Artificial Intelligence (AI)** and **Deep Learning** models in a single platform.
 
 ---
 
-## One Cikan Ozellikler
+## Key Features
 
-### Yapay Zeka Destekli Analizler (Phase 10)
-*   **AI Executive Brief (Akilli Bulten):** Portfoyunuzdeki hisseleri ve canli piyasa haberlerini **Google Gemini 2.5-Flash** kullanarak saniyeler icinde analiz eder ve size profesyonel bir yonetim ozeti sunar.
-*   **Fiyat Tahminleme (LSTM):** Gecmis verileri kullanarak, hissenin gelecekteki yonunu (Yukselis/Dusus) %90+ guven araliginda tahmin eden **TensorFlow/Keras** tabanli bir derin ogrenme modelidir.
-*   **Duygu Analizi (FinBERT):** Binlerce piyasa haberini saniyeler icinde tarar ve **HuggingFace FinBERT** modeli ile piyasanin o anki psikolojisini (Boga/Ayi) olcer.
+### AI-Powered Analytics (Phase 10)
+*   **AI Executive Brief:** Analyzes your portfolio holdings and real-time market news using **Google Gemini 2.5-Flash** to provide a professional management summary in seconds.
+*   **Price Forecasting (LSTM):** A deep learning model built with **TensorFlow/Keras** that predicts future price direction (Uptrend/Downtrend) with a high confidence interval based on historical data.
+*   **Sentiment Analysis (FinBERT):** Scans thousands of market news headlines within seconds and measures current market psychology (Bullish/Bearish) using the **HuggingFace FinBERT** model.
 
-### Gercek Zamanli Teknoloji
-*   **Canli Veri Akisi (WebSocket):** Altin, BIST ve Doviz verileri, sayfa yenilemeye gerek kalmadan **FastAPI WebSocket** uzerinden her 3 saniyede bir otomatik guncellenir.
-*   **Teknik Gostergeler:** RSI (14) ve MACD verilerini grafik uzerinde anlik olarak hesaplar ve gorsellestirir.
+### Real-Time Technology
+*   **Live Data Streaming (WebSocket):** Gold, BIST, and Currency data are automatically updated every 3 seconds via **FastAPI WebSocket** without requiring page refreshes.
+*   **Technical Indicators:** Calculates and visualizes RSI (14) and MACD data on the chart in real-time.
 
 ---
 
-## Teknoloji Yigini (Tech Stack)
+## Tech Stack
 
-| Katman | Teknoloji |
+| Layer | Technology |
 |---|---|
 | **Frontend** | Flutter (Dart), fl_chart, web_socket_channel |
 | **Backend** | Python, FastAPI, SQLite |
-| **Yapay Zeka** | Google Gemini SDK, TensorFlow, FinBERT |
-| **Veri Kaynagi** | yfinance (Yahoo Finance API) |
+| **Artificial Intelligence** | Google Gemini SDK, TensorFlow, FinBERT |
+| **Data Source** | yfinance (Yahoo Finance API) |
 
 ---
 
-## Kurulum ve Calistirma
+## Installation and Execution
 
-Projeyi yerel makinenizde calistirmak icin su adimlari izleyin:
+Follow these steps to run the project on your local machine:
 
-### 1. Backend (Python) Kurulumu
+### 1. Backend (Python) Setup
 ```bash
-# Bagimliliklari yukleyin
+# Install dependencies
 pip install -r requirements.txt
 
-# Sunucuyu baslatin
+# Start the server
 python api_server.py
 ```
 
-### 2. Frontend (Flutter) Kurulumu
+### 2. Frontend (Flutter) Setup
 ```bash
-# Paketleri cekin
+# Fetch packages
 flutter pub get
 
-# Chrome uzerinde baslatin
+# Run on Chrome
 flutter run -d chrome
 ```
 
 ---
 
-## Guvenlik
+## Security
 
-Proje, hassas verilerinizi korumak icin .env tabanli bir yapi kullanir. Gemini API anahtarinizi ve veritabanı ayarlarinizi yerel .env dosyanizda guvenle saklayabilirsiniz.
+The project uses a .env-based structure to protect sensitive data. You can securely store your Gemini API key and database settings in your local .env file.
 
 ---
 
-## Gelistirici
+## Developer
 **Canberk Sezgin** - *Borsa Dashboard Project Lead*
 
+---
+*This project was developed for educational and portfolio prototype purposes. It does not contain financial advice.*
