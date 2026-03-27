@@ -62,4 +62,4 @@ The project uses a .env-based structure to protect sensitive data. You can secur
 **Canberk Sezgin** - *Borsa Dashboard Project Lead*
 
 ---
-*This project was developed for educational and portfolio prototype purposes. It does not contain financial advice.*
+
