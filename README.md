@@ -1,18 +1,65 @@
-#  Autonomous AI Finance Terminal
+# 🚀 Borsa Dashboard: AI-Powered Financial Terminal
 
-A full-stack, real-time financial dashboard that leverages deep learning and natural language processing to analyze market trends. Built with a Flutter frontend and a Python/FastAPI backend.
+**Borsa Dashboard**, modern borsa yatırımcıları için tasarlanmış, **Hissedeki Yapay Zeka (AI)** ve **Derin Öğrenme (Deep Learning)** modellerini tek bir çatıda birleştiren profesyonel bir finans terminalidir.
 
-##  Features
+---
 
-* **Live Auto-Pilot (Otonom Yenileme):** Automatically fetches and refreshes market data, news, and predictions every 3 minutes.
-* **AI Price Forecasting (LSTM):** Utilizes a Long Short-Term Memory neural network (built with TensorFlow/Keras) to predict short-term price movements based on historical data.
-* **Sentiment Analysis (FinBERT):** Scrapes real-time financial news and processes headlines through a specialized HuggingFace NLP model to gauge market sentiment (Bullish/Bearish).
-* **Real-time Technical Indicators:** Calculates and visualizes RSI (14) and MACD instantly.
-* **Premium UI/UX:** A minimalist, light-themed institutional-grade dashboard featuring state-of-the-art animations.
+## ✨ Öne Çıkan Özellikler
 
-##  Tech Stack
+### 🧠 Yapay Zeka Destekli Analizler (Phase 10)
+*   **AI Executive Brief (Akıllı Bülten):** Portföyünüzdeki hisseleri ve canlı piyasa haberlerini **Google Gemini 2.5-Flash** kullanarak saniyeler içinde analiz eder ve size profesyonel bir yönetim özeti sunar.
+*   **Fiyat Tahminleme (LSTM):** Geçmiş verileri kullanarak, hissenin gelecekteki yönünü (Yükseliş/Düşüş) %90+ güven aralığında tahmin eden **TensorFlow/Keras** tabanlı bir derin öğrenme modelidir.
+*   **Duygu Analizi (FinBERT):** Binlerce piyasa haberini saniyeler içinde tarar ve **HuggingFace FinBERT** modeli ile piyasanın o anki psikolojisini (Boğa/Ayı) ölçer.
 
-* **Frontend:** Flutter (Dart)
-* **Backend:** Python, FastAPI, Uvicorn
-* **Machine Learning:** TensorFlow, Scikit-learn, HuggingFace Transformers (FinBERT)
-* **Data Sources:** `yfinance` API
+### ⚡ Gerçek Zamanlı Teknoloji
+*   **Canlı Veri Akışı (WebSocket):** Altın, BIST ve Döviz verileri, sayfa yenilemeye gerek kalmadan **FastAPI WebSocket** üzerinden her 3 saniyede bir otomatik güncellenir.
+*   **Teknik Göstergeler:** RSI (14) ve MACD verilerini grafik üzerinde anlık olarak hesaplar ve görselleştirir.
+
+---
+
+## 🛠️ Teknoloji Yığını (Tech Stack)
+
+| Katman | Teknoloji |
+|---|---|
+| **Frontend** | Flutter (Dart), fl_chart, web_socket_channel |
+| **Backend** | Python, FastAPI, SQLite |
+| **Yapay Zeka** | Google Gemini SDK, TensorFlow, FinBERT |
+| **Veri Kaynağı** | yfinance (Yahoo Finance API) |
+
+---
+
+## 🚀 Kurulum ve Çalıştırma
+
+Projeyi yerel makinenizde çalıştırmak için şu adımları izleyin:
+
+### 1. Backend (Python) Kurulumu
+```bash
+# Bağımlılıkları yükleyin
+pip install -r requirements.txt
+
+# Sunucuyu başlatın
+python api_server.py
+```
+
+### 2. Frontend (Flutter) Kurulumu
+```bash
+# Paketleri çekin
+flutter pub get
+
+# Chrome üzerinde başlatin
+flutter run -d chrome
+```
+
+---
+
+## 🔒 Güvenlik
+
+Proje, hassas verilerinizi korumak için `.env` tabanlı bir yapı kullanır. Gemini API anahtarınızı ve veritabanı ayarlarınızı yerel `.env` dosyanızda güvenle saklayabilirsiniz.
+
+---
+
+## 👨‍💻 Geliştirici
+**Canberk Sezgin** - *Borsa Dashboard Project Lead*
+
+---
+*Bu proje eğitim ve portföy prototipi amacıyla geliştirilmiştir. Kesinlikle yatırım tavsiyesi içermez.*
