@@ -61,5 +61,3 @@ Proje, hassas verilerinizi korumak icin .env tabanli bir yapi kullanir. Gemini A
 ## Gelistirici
 **Canberk Sezgin** - *Borsa Dashboard Project Lead*
 
----
-*Bu proje egitim ve portfoy prototipi amaciyla gelistirilmistir. Kesinlikle yatirim tavsiyesi icermez.*
